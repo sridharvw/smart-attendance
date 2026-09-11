@@ -191,6 +191,30 @@ npm run lint
 
 Read [DEPLOYMENT.md](DEPLOYMENT.md) for the complete MongoDB Atlas, Render, and Vercel instructions.
 
+### GitHub Pages
+
+GitHub Pages can host the React frontend, but it cannot run the Express backend or MongoDB. The repository includes a GitHub Actions workflow at `.github/workflows/deploy-pages.yml`.
+
+Before using it:
+
+1. Deploy the backend to Render first.
+2. In GitHub, open **Settings > Pages** and set **Source** to **GitHub Actions**.
+3. Open **Settings > Secrets and variables > Actions > Variables**.
+4. Add `VITE_API_URL` with the public backend URL, for example:
+
+```text
+https://your-render-service.onrender.com/api
+```
+
+5. Push to `main` or run the workflow manually.
+6. Open:
+
+```text
+https://sridharvw.github.io/smart-attendance/
+```
+
+The workflow builds from `frontend/`, so GitHub Pages will no longer display the repository README. Use the trailing slash in the URL. Meeting links must include the repository path, for example `/smart-attendance/meeting/<event-id>`.
+
 Production variables:
 
 ### Render backend

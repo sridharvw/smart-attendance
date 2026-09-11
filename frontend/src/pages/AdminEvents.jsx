@@ -34,6 +34,7 @@ export default function AdminEvents({ onLogout }) {
   const [createdEvent, setCreatedEvent] = useState(null);
   const [locating, setLocating] = useState(false);
   const [locationAccuracy, setLocationAccuracy] = useState(null);
+  const meetingUrl = eventId => `${window.location.origin}${import.meta.env.BASE_URL}meeting/${eventId}`;
 
   const latitude = Number(form.latitude);
   const longitude = Number(form.longitude);
@@ -140,13 +141,13 @@ export default function AdminEvents({ onLogout }) {
 
         {createdEvent && (
           <div className="mb-6 flex flex-wrap items-center gap-5 rounded-xl border border-green-200 bg-green-50 p-5">
-            <QRCodeCanvas value={`${window.location.origin}/meeting/${createdEvent._id}`} size={132} includeMargin />
+            <QRCodeCanvas value={meetingUrl(createdEvent._id)} size={132} includeMargin />
             <div className="min-w-0 flex-1">
               <h2 className="font-bold text-green-900">Meeting link ready</h2>
               <p className="mt-1 text-sm text-green-800">Share this link or QR code. It opens this meeting directly.</p>
               <div className="mt-3 flex max-w-xl items-center gap-2 rounded-lg border border-green-200 bg-white p-2">
-                <input readOnly value={`${window.location.origin}/meeting/${createdEvent._id}`} className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none" />
-                <button type="button" title="Copy meeting link" onClick={() => navigator.clipboard.writeText(`${window.location.origin}/meeting/${createdEvent._id}`)} className="rounded-md p-2 text-green-700 hover:bg-green-50"><Copy size={16} /></button>
+                <input readOnly value={meetingUrl(createdEvent._id)} className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none" />
+                <button type="button" title="Copy meeting link" onClick={() => navigator.clipboard.writeText(meetingUrl(createdEvent._id))} className="rounded-md p-2 text-green-700 hover:bg-green-50"><Copy size={16} /></button>
               </div>
             </div>
           </div>

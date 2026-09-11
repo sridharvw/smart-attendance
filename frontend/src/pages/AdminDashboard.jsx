@@ -137,7 +137,7 @@ export default function AdminDashboard({ onLogout }) {
     );
   }
 
-  const meetingLink = `${window.location.origin}/meeting/${event._id}`;
+  const meetingLink = `${window.location.origin}${import.meta.env.BASE_URL}meeting/${event._id}`;
 
   const presentCount = attendances.filter(a => a.status === 'present').length;
   const reviewCount = attendances.filter(a => a.status === 'needs_review').length;
