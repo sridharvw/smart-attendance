@@ -38,7 +38,7 @@ connectDB();
 // ----------------------------------------------------
 app.post('/api/admin/login', (req, res) => {
   const { password } = req.body;
-  const validPassword = process.env.ADMIN_PASSWORD || 'admin123';
+  const validPassword = process.env.ADMIN_PASSWORD || 'Nss@2021';
   
   if (password === validPassword) {
     const token = jwt.sign(

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { CalendarPlus, Copy, Crosshair, MapPin, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CalendarPlus, CheckCircle2, Copy, Crosshair, Download, Search, X, XCircle, Users, MapPin, RefreshCw } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { API_BASE_URL } from '../api';
 import AdminNav from '../components/AdminNav';
@@ -34,6 +34,12 @@ export default function AdminEvents({ onLogout }) {
   const [createdEvent, setCreatedEvent] = useState(null);
   const [locating, setLocating] = useState(false);
   const [locationAccuracy, setLocationAccuracy] = useState(null);
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [selectedAttendance, setSelectedAttendance] = useState([]);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [attendanceError, setAttendanceError] = useState('');
+  const [attendeeQuery, setAttendeeQuery] = useState('');
+  const [attendanceFilter, setAttendanceFilter] = useState('all');
   const meetingUrl = eventId => `${window.location.origin}${import.meta.env.BASE_URL}meeting/${eventId}`;
 
   const latitude = Number(form.latitude);
@@ -91,6 +97,43 @@ export default function AdminEvents({ onLogout }) {
     );
   };
 
+  const viewAttendance = async event => {
+    setSelectedEvent(event);
+    setSelectedAttendance([]);
+    setAttendanceLoading(true);
+    setAttendanceError('');
+    setAttendeeQuery('');
+    setAttendanceFilter('all');
+
+    try {
+      const response = await axios.get(`${API_BASE_URL}/attendance/live/${event._id}`);
+      setSelectedAttendance(response.data);
+    } catch (requestError) {
+      setAttendanceError(requestError.response?.data?.message || 'Could not load attendance records');
+    } finally {
+      setAttendanceLoading(false);
+    }
+  };
+
+  const downloadAttendance = eventId => {
+    axios.get(`${API_BASE_URL}/attendance/export/${eventId}`, { responseType: 'blob' })
+      .then(response => {
+        const url = URL.createObjectURL(response.data);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `attendance-report-${eventId}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+      })
+      .catch(() => setAttendanceError('Could not download the attendance report'));
+  };
+
+  const filteredAttendance = selectedAttendance.filter(record => {
+    const matchesFilter = attendanceFilter === 'all' || record.status === attendanceFilter;
+    const searchText = `${record.user_id?.name || ''} ${record.user_id?.register_number || ''} ${record.user_id?.course || ''}`.toLowerCase();
+    return matchesFilter && searchText.includes(attendeeQuery.toLowerCase());
+  });
+
   const handleSubmit = async event => {
     event.preventDefault();
     setSaving(true);
@@ -98,12 +141,24 @@ export default function AdminEvents({ onLogout }) {
     setMessage('');
 
     try {
+      const openDateTime = new Date(`${form.date}T${form.openTime}`);
+      const closeDateTime = new Date(`${form.date}T${form.closeTime}`);
+      const eventDate = new Date(`${form.date}T00:00:00`);
+
+      if ([eventDate, openDateTime, closeDateTime].some(value => Number.isNaN(value.getTime()))) {
+        throw new Error('Please enter a valid meeting date and time');
+      }
+
+      if (closeDateTime <= openDateTime) {
+        closeDateTime.setDate(closeDateTime.getDate() + 1);
+      }
+
       const response = await axios.post(`${API_BASE_URL}/events`, {
         name: form.name,
         venue: form.venue,
-        date: new Date(`${form.date}T${form.openTime}`).toISOString(),
-        open_time: new Date(`${form.date}T${form.openTime}`).toISOString(),
-        close_time: new Date(`${form.date}T${form.closeTime}`).toISOString(),
+        date: eventDate.toISOString(),
+        open_time: openDateTime.toISOString(),
+        close_time: closeDateTime.toISOString(),
         latitude: form.latitude,
         longitude: form.longitude,
         radius: form.radius,
@@ -114,7 +169,11 @@ export default function AdminEvents({ onLogout }) {
       setMessage('Meeting created successfully.');
       await loadEvents();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'Could not create meeting');
+      const serverMessage = requestError.response?.data?.message;
+      const connectionMessage = !requestError.response
+        ? `Could not reach the attendance server at ${API_BASE_URL}. Start the backend and try again.`
+        : '';
+      setError(serverMessage || connectionMessage || requestError.message || 'Could not create meeting');
     } finally {
       setSaving(false);
     }
@@ -232,15 +291,21 @@ export default function AdminEvents({ onLogout }) {
             {loading ? <p className="p-6 text-gray-500">Loading meetings...</p> : (
               <div className="divide-y divide-gray-100">
                 {events.map(event => (
-                  <div key={event._id} className="flex flex-wrap items-center justify-between gap-4 p-5">
+                  <div key={event._id} className="flex flex-wrap items-center justify-between gap-4 p-5 transition hover:bg-gray-50">
                     <div>
                       <div className="flex items-center gap-2 font-semibold text-gray-900">
                         {event.name}
                         <span className={`rounded-full px-2 py-1 text-xs font-bold uppercase ${event.status === 'open' ? 'bg-green-100 text-green-700' : event.status === 'upcoming' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{event.status}</span>
                       </div>
                       <p className="mt-1 flex items-center gap-1 text-sm text-gray-500"><MapPin size={14} /> {event.venue}</p>
+                      <p className="mt-1 text-xs text-gray-400">{new Date(event.open_time).toLocaleString()} - {new Date(event.close_time).toLocaleTimeString()}</p>
                     </div>
-                    <p className="text-sm text-gray-500">{new Date(event.date).toLocaleDateString()}</p>
+                    <div className="flex items-center gap-4">
+                      <p className="text-sm text-gray-500">{new Date(event.date).toLocaleDateString()}</p>
+                      <button type="button" onClick={() => viewAttendance(event)} className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">
+                        <Users size={16} /> View attendance
+                      </button>
+                    </div>
                   </div>
                 ))}
                 {!events.length && <p className="p-6 text-gray-500">No meetings created yet.</p>}
@@ -249,6 +314,73 @@ export default function AdminEvents({ onLogout }) {
           </section>
         </div>
       </div>
+
+      {selectedEvent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 p-4" role="dialog" aria-modal="true" aria-labelledby="attendance-dialog-title">
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-gray-200 p-6">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 id="attendance-dialog-title" className="text-xl font-bold text-gray-900">{selectedEvent.name}</h2>
+                  <span className={`rounded-full px-2 py-1 text-xs font-bold uppercase ${selectedEvent.status === 'closed' ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-700'}`}>{selectedEvent.status}</span>
+                </div>
+                <p className="mt-1 text-sm text-gray-500">{selectedEvent.venue} · {new Date(selectedEvent.date).toLocaleDateString()}</p>
+              </div>
+              <button type="button" onClick={() => setSelectedEvent(null)} title="Close attendance details" className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900"><X size={20} /></button>
+            </div>
+
+            <div className="overflow-y-auto p-6">
+              {attendanceError && <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{attendanceError}</div>}
+              {attendanceLoading ? <p className="py-12 text-center text-gray-500">Loading attendance records...</p> : (
+                <>
+                  <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div className="rounded-lg border border-gray-200 p-4"><p className="text-xs font-semibold uppercase text-gray-500">Total scans</p><p className="mt-1 text-2xl font-bold text-gray-900">{selectedAttendance.length}</p></div>
+                    <div className="rounded-lg border border-green-200 bg-green-50 p-4"><p className="text-xs font-semibold uppercase text-green-700">Present</p><p className="mt-1 text-2xl font-bold text-green-700">{selectedAttendance.filter(record => record.status === 'present').length}</p></div>
+                    <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4"><p className="text-xs font-semibold uppercase text-yellow-700">Review</p><p className="mt-1 text-2xl font-bold text-yellow-700">{selectedAttendance.filter(record => record.status === 'needs_review').length}</p></div>
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-4"><p className="text-xs font-semibold uppercase text-red-700">Rejected</p><p className="mt-1 text-2xl font-bold text-red-700">{selectedAttendance.filter(record => record.status === 'rejected').length}</p></div>
+                  </div>
+
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <label className="relative min-w-[220px] flex-1">
+                      <Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input value={attendeeQuery} onChange={event => setAttendeeQuery(event.target.value)} placeholder="Search name, register number, or course" className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm" />
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <select value={attendanceFilter} onChange={event => setAttendanceFilter(event.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700">
+                        <option value="all">All statuses</option>
+                        <option value="present">Present</option>
+                        <option value="needs_review">Needs review</option>
+                        <option value="rejected">Rejected</option>
+                      </select>
+                      <button type="button" onClick={() => downloadAttendance(selectedEvent._id)} title="Download attendance CSV" className="flex items-center gap-2 rounded-lg bg-gray-800 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-900"><Download size={16} /> CSV</button>
+                    </div>
+                  </div>
+
+                  <div className="overflow-hidden rounded-lg border border-gray-200">
+                    <div className="hidden grid-cols-[1.5fr_1fr_1fr_1fr] gap-3 bg-gray-50 px-4 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 sm:grid">
+                      <span>Volunteer</span><span>Course</span><span>Check-in</span><span>Status</span>
+                    </div>
+                    <div className="divide-y divide-gray-100">
+                      {filteredAttendance.map(record => (
+                        <div key={record._id} className="grid gap-2 px-4 py-4 sm:grid-cols-[1.5fr_1fr_1fr_1fr] sm:items-center sm:gap-3">
+                          <div><p className="font-semibold text-gray-900">{record.user_id?.name || 'Unknown volunteer'}</p><p className="text-sm text-gray-500">{record.user_id?.register_number || 'No register number'}</p></div>
+                          <p className="text-sm text-gray-600">{record.user_id?.course || 'Not recorded'} <span className="text-gray-400">· {record.user_id?.semester || 'N/A'}</span></p>
+                          <p className="text-sm text-gray-600">{new Date(record.createdAt).toLocaleString()}</p>
+                          <span className={`flex w-fit items-center gap-1 rounded-full px-2 py-1 text-xs font-bold uppercase ${record.status === 'present' ? 'bg-green-100 text-green-700' : record.status === 'needs_review' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                            {record.status === 'present' ? <CheckCircle2 size={13} /> : record.status === 'needs_review' ? <AlertTriangle size={13} /> : <XCircle size={13} />}
+                            {record.status.replace('_', ' ')}
+                          </span>
+                        </div>
+                      ))}
+                      {!filteredAttendance.length && <p className="p-8 text-center text-sm text-gray-500">No attendance records match this filter.</p>}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
