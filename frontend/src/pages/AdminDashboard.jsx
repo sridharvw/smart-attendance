@@ -3,7 +3,7 @@ import axios from 'axios';
 import { QRCodeCanvas } from 'qrcode.react';
 import { API_BASE_URL } from '../api';
 import AdminNav from '../components/AdminNav';
-import { Copy, Download } from 'lucide-react';
+import { Check, Copy, Download, X } from 'lucide-react';
 
 export default function AdminDashboard({ onLogout }) {
   const [event, setEvent] = useState(null);
@@ -11,13 +11,16 @@ export default function AdminDashboard({ onLogout }) {
   const [codeData, setCodeData] = useState({ code: '----', expires_in: 300 });
   const [loading, setLoading] = useState(true);
   const [reviewingId, setReviewingId] = useState(null);
+  const [selectedReviewIds, setSelectedReviewIds] = useState([]);
+  const [bulkActionStatus, setBulkActionStatus] = useState(null);
+  const [sortBy, setSortBy] = useState('recent');
   const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     initialLoad();
 
-    // Refresh attendance feed every 5 seconds
-    const attendanceInterval = setInterval(fetchDashboardData, 5000);
+    // Refresh attendance feed every 3 seconds
+    const attendanceInterval = setInterval(fetchDashboardData, 3000);
     
     // Refresh countdown every 1 second
     const codeInterval = setInterval(() => {
@@ -94,6 +97,7 @@ export default function AdminDashboard({ onLogout }) {
     setAttendances(previous => previous.map(record => record._id === attendanceId
       ? { ...record, status: newStatus, override_reason: reason.trim() }
       : record));
+    setSelectedReviewIds(previous => previous.filter(id => id !== attendanceId));
   } catch (error) {
     console.error('Failed to update status', error);
     if (error.response?.status === 401) {
@@ -106,6 +110,49 @@ export default function AdminDashboard({ onLogout }) {
     setReviewingId(null);
   }
 };
+
+  const handleBulkAction = async (newStatus) => {
+    if (reviewingId || bulkActionStatus) return;
+
+    const selectedIds = attendances
+      .filter(record => record.status === 'needs_review' && selectedReviewIds.includes(record._id))
+      .map(record => record._id);
+    if (!selectedIds.length) return;
+
+    const actionLabel = newStatus === 'present' ? 'accept' : 'reject';
+    const reason = window.prompt(`Reason to ${actionLabel} ${selectedIds.length} selected check-ins:`);
+    if (!reason?.trim()) return;
+
+    setBulkActionStatus(newStatus);
+    setActionError('');
+    try {
+      const results = await Promise.allSettled(selectedIds.map(attendanceId => (
+        axios.patch(`${API_BASE_URL}/attendance/${attendanceId}/status`, {
+          status: newStatus,
+          override_reason: reason.trim()
+        })
+      )));
+      const successfulIds = selectedIds.filter((_, index) => results[index].status === 'fulfilled');
+      const failedResults = results.filter(result => result.status === 'rejected');
+
+      setAttendances(previous => previous.map(record => successfulIds.includes(record._id)
+        ? { ...record, status: newStatus, override_reason: reason.trim() }
+        : record));
+      setSelectedReviewIds(previous => previous.filter(id => !successfulIds.includes(id)));
+
+      if (failedResults.some(result => result.reason?.response?.status === 401)) {
+        localStorage.removeItem('adminToken');
+        window.location.href = '/admin';
+        return;
+      }
+
+      if (failedResults.length) {
+        setActionError(`${successfulIds.length} updated; ${failedResults.length} failed and remain selected for retry.`);
+      }
+    } finally {
+      setBulkActionStatus(null);
+    }
+  };
 
   const handleExportCSV = () => {
     if (!event) return;
@@ -141,6 +188,67 @@ export default function AdminDashboard({ onLogout }) {
 
   const presentCount = attendances.filter(a => a.status === 'present').length;
   const reviewCount = attendances.filter(a => a.status === 'needs_review').length;
+  const rejectedCount = attendances.filter(a => a.status === 'rejected').length;
+  const reviewIds = attendances.filter(a => a.status === 'needs_review').map(a => a._id);
+  const selectedReviewCount = reviewIds.filter(id => selectedReviewIds.includes(id)).length;
+  const allReviewsSelected = reviewIds.length > 0 && selectedReviewCount === reviewIds.length;
+  const deviceUseCounts = new Map();
+  attendances.forEach(record => {
+    if (record.device_id) {
+      deviceUseCounts.set(record.device_id, (deviceUseCounts.get(record.device_id) || 0) + 1);
+    }
+  });
+  const calculateRiskScore = (record) => {
+    const distance = record.location?.distance_from_venue;
+    const accuracy = record.location?.accuracy;
+    const radius = event.location?.radius;
+    let score = record.status === 'needs_review' ? 100 : 0;
+
+    if (record.device_id && deviceUseCounts.get(record.device_id) > 1) score += 50;
+    if (Number.isFinite(distance) && Number.isFinite(radius) && distance > radius) {
+      score += 50;
+    } else if (Number.isFinite(distance) && Number.isFinite(accuracy) && Number.isFinite(radius) && distance + accuracy > radius) {
+      score += 30;
+    }
+
+    return score;
+  };
+  const mostRecentFirst = (first, second) => new Date(second.createdAt) - new Date(first.createdAt);
+  const sortedAttendances = [...attendances].sort((first, second) => {
+    if (sortBy === 'risky') {
+      return calculateRiskScore(second) - calculateRiskScore(first) || mostRecentFirst(first, second);
+    }
+    if (sortBy === 'distance') {
+      const distanceDifference = (second.location?.distance_from_venue ?? -Infinity) - (first.location?.distance_from_venue ?? -Infinity);
+      return distanceDifference || mostRecentFirst(first, second);
+    }
+    if (sortBy === 'accuracy') {
+      const accuracyDifference = (second.location?.accuracy ?? -Infinity) - (first.location?.accuracy ?? -Infinity);
+      return accuracyDifference || mostRecentFirst(first, second);
+    }
+    return mostRecentFirst(first, second);
+  });
+  const getReviewReasons = (record) => {
+    const distance = record.location?.distance_from_venue;
+    const accuracy = record.location?.accuracy;
+    const radius = event.location?.radius;
+    const reasons = [];
+
+    if (Number.isFinite(distance) && Number.isFinite(radius) && distance > radius) {
+      reasons.push(`${Math.round(distance - radius)}m outside the venue radius`);
+    } else if (Number.isFinite(distance) && Number.isFinite(accuracy) && Number.isFinite(radius) && distance + accuracy > radius) {
+      reasons.push(`GPS uncertainty reaches beyond the venue radius (${Math.round(accuracy)}m accuracy)`);
+    }
+
+    const deviceReused = record.device_id && attendances.some(candidate => (
+      candidate._id !== record._id &&
+      candidate.device_id === record.device_id &&
+      String(candidate.user_id?._id || candidate.user_id) !== String(record.user_id?._id || record.user_id)
+    ));
+    if (deviceReused) reasons.push('Same device used for another volunteer');
+
+    return reasons.length ? reasons : ['Flagged for admin review'];
+  };
 
   const handleCloseEvent = async () => {
   const confirmClose = window.confirm("Are you sure you want to close this event? No more attendance will be accepted.");
@@ -219,7 +327,7 @@ export default function AdminDashboard({ onLogout }) {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
             <div className="text-gray-500 text-sm font-medium">Total Scans</div>
             <div className="text-3xl font-bold text-gray-900">{attendances.length}</div>
@@ -232,21 +340,96 @@ export default function AdminDashboard({ onLogout }) {
             <div className="text-red-600 text-sm font-medium">⚠️ Needs Review</div>
             <div className="text-3xl font-bold text-red-600">{reviewCount}</div>
           </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+            <div className="text-gray-500 text-sm font-medium">Rejected</div>
+            <div className="text-3xl font-bold text-red-700">{rejectedCount}</div>
+          </div>
         </div>
 
         {/* Live Feed Table */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="bg-gray-50 px-6 py-3 border-b border-gray-100 font-semibold text-gray-700">
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 px-6 py-3 border-b border-gray-100 font-semibold text-gray-700">
             Recent Check-ins
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <span>Sort</span>
+              <select
+                value={sortBy}
+                onChange={event => setSortBy(event.target.value)}
+                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+                aria-label="Sort attendance records"
+              >
+                <option value="recent">Recent First</option>
+                <option value="risky">Most Risky First</option>
+                <option value="distance">Farthest Away First</option>
+                <option value="accuracy">Worst GPS First</option>
+              </select>
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-white px-6 py-3">
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={allReviewsSelected}
+                disabled={reviewIds.length === 0 || Boolean(reviewingId) || Boolean(bulkActionStatus)}
+                onChange={() => setSelectedReviewIds(previous => (
+                  allReviewsSelected
+                    ? previous.filter(id => !reviewIds.includes(id))
+                    : [...new Set([...previous, ...reviewIds])]
+                ))}
+                className="h-4 w-4 accent-blue-600"
+                aria-label="Select all check-ins needing review"
+              />
+              Select all {reviewCount} needing review
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedReviewCount > 0 && <span className="mr-1 text-sm text-gray-600">{selectedReviewCount} selected</span>}
+              <button
+                type="button"
+                onClick={() => handleBulkAction('present')}
+                disabled={selectedReviewCount === 0 || Boolean(reviewingId) || Boolean(bulkActionStatus)}
+                className="flex items-center gap-2 rounded-md bg-green-700 px-3 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Check size={16} /> {bulkActionStatus === 'present' ? 'Accepting…' : 'Accept selected'}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleBulkAction('rejected')}
+                disabled={selectedReviewCount === 0 || Boolean(reviewingId) || Boolean(bulkActionStatus)}
+                className="flex items-center gap-2 rounded-md bg-red-700 px-3 py-2 text-sm font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <X size={16} /> {bulkActionStatus === 'rejected' ? 'Rejecting…' : 'Reject selected'}
+              </button>
+            </div>
           </div>
           <div className="divide-y divide-gray-100">
-            {attendances.map((record) => (
+            {sortedAttendances.map((record) => (
               <div key={record._id} className="p-4 px-6 flex items-center justify-between hover:bg-gray-50 transition">
-                <div>
-                  <div className="font-bold text-gray-900">{record.user_id?.name || 'Unknown'}</div>
-                  <div className="text-sm text-gray-500">{record.user_id?.register_number || 'N/A'}</div>
-                  <div className="text-xs text-gray-400 mt-1">{record.location.distance_from_venue}m away</div>
-                  <div className="text-xs text-gray-400">Device: {record.device_id || 'Not recorded'}</div>
+                <div className="flex min-w-0 items-start gap-3">
+                  {record.status === 'needs_review' && (
+                    <input
+                      type="checkbox"
+                      checked={selectedReviewIds.includes(record._id)}
+                      disabled={Boolean(reviewingId) || Boolean(bulkActionStatus)}
+                      onChange={() => setSelectedReviewIds(previous => (
+                        previous.includes(record._id)
+                          ? previous.filter(id => id !== record._id)
+                          : [...previous, record._id]
+                      ))}
+                      className="mt-1 h-4 w-4 accent-blue-600"
+                      aria-label={`Select ${record.user_id?.name || 'volunteer'} for review action`}
+                    />
+                  )}
+                  <div>
+                    <div className="font-bold text-gray-900">{record.user_id?.name || 'Unknown'}</div>
+                    <div className="text-sm text-gray-500">{record.user_id?.register_number || 'N/A'}</div>
+                    <div className="text-xs text-gray-400 mt-1">{record.location?.distance_from_venue ?? 'Unknown'}m away</div>
+                    <div className="text-xs text-gray-400">Device: {record.device_id || 'Not recorded'}</div>
+                    {record.status === 'needs_review' && (
+                      <div className="mt-2 space-y-1 rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
+                        {getReviewReasons(record).map(reason => <p key={reason}>{reason}</p>)}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center space-x-3">
                   <button 
@@ -279,14 +462,14 @@ export default function AdminDashboard({ onLogout }) {
                   {record.status === 'needs_review' && (
                     <div className="flex space-x-1">
                       <button 
-                        disabled={reviewingId === record._id}
+                        disabled={reviewingId === record._id || Boolean(bulkActionStatus)}
                         onClick={() => handleStatusUpdate(record._id, 'present')}
                         className="bg-green-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-green-700 transition"
                       >
                         {reviewingId === record._id ? 'Saving...' : 'Accept'}
                       </button>
                       <button 
-                        disabled={reviewingId === record._id}
+                        disabled={reviewingId === record._id || Boolean(bulkActionStatus)}
                         onClick={() => handleStatusUpdate(record._id, 'rejected')}
                         className="bg-red-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-red-700 transition"
                       >

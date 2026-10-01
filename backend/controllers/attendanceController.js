@@ -3,6 +3,7 @@ const Event = require('../models/Event');
 const Attendance = require('../models/Attendance');
 const EventCode = require('../models/EventCode');
 const calculateDistance = require('../utils/geoDistance');
+const isWithinReliableGeofence = require('../utils/isWithinReliableGeofence');
 
 exports.getDirectory = async (req, res) => {
   try {
@@ -104,8 +105,9 @@ exports.markAttendance = async (req, res) => {
   try {
     const { regNumber, name, course, section, event_id, latitude, longitude, accuracy, device_id, code } = req.body;
 
-    if (!regNumber || !name || !course || !section || !code || !Number.isFinite(Number(latitude)) || !Number.isFinite(Number(longitude))) {
-      return res.status(400).json({ message: 'Complete student details and a valid location are required' });
+    const gpsAccuracy = typeof accuracy === 'number' ? accuracy : NaN;
+    if (!regNumber || !name || !course || !section || !code || !Number.isFinite(Number(latitude)) || !Number.isFinite(Number(longitude)) || !Number.isFinite(gpsAccuracy) || gpsAccuracy < 0) {
+      return res.status(400).json({ message: 'Complete student details and a valid location with GPS accuracy are required' });
     }
     
     // Ensure event is open
@@ -159,10 +161,9 @@ exports.markAttendance = async (req, res) => {
       longitude
     );
 
-    let status = 'present';
-    if (distance > event.location.radius) {
-      status = 'needs_review';
-    }
+    let status = isWithinReliableGeofence(distance, gpsAccuracy, event.location.radius)
+      ? 'present'
+      : 'needs_review';
 
     // Check for device fingerprint anomaly (shared device check)
     const existingDevice = await Attendance.findOne({ event_id, device_id });
@@ -175,7 +176,7 @@ exports.markAttendance = async (req, res) => {
       event_id,
       user_id: user._id,
       status,
-      location: { latitude, longitude, accuracy: Number(accuracy) || undefined, distance_from_venue: distance },
+      location: { latitude, longitude, accuracy: gpsAccuracy, distance_from_venue: distance },
       device_id
     });
 

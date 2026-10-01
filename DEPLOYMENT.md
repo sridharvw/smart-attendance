@@ -1,5 +1,48 @@
 # Deployment
 
+## Pre-deployment verification
+
+Run the automated checks from the repository root:
+
+```powershell
+Push-Location backend
+npm test
+Pop-Location
+
+Push-Location frontend
+npm run lint
+npm run build
+Pop-Location
+```
+
+The frontend has no automated interaction-test suite yet. Before deploying, verify these flows locally with MongoDB and both development servers running:
+
+- Create an open meeting and submit attendance from a phone or browser with location permission. The check-in page should show GPS accuracy and distance before submission. A location whose distance plus GPS accuracy exceeds the meeting radius should be recorded as `needs_review`, not confirmed present.
+- In the admin dashboard, confirm that new check-ins and the four attendance counts update within about three seconds, while the rotating-code countdown continues to update each second.
+- Try each feed sort: recent, most risky, farthest away, and worst GPS accuracy. Missing distance or accuracy values should sort after measured values for their respective sort modes.
+- Select several `needs_review` entries and accept or reject them with a reason. Successful entries should update in place; failed entries should remain selected and show an error. Also verify that row actions are disabled during a bulk request.
+- Confirm the rejected count changes after an individual or bulk rejection.
+
+For a production smoke test, check in from a phone over HTTPS, then verify the result and dashboard record. GPS data is supplied by the volunteer's device and should not be treated as tamper-proof evidence on its own.
+
+## Environment variables
+
+No third-party API keys are required. Configure these values:
+
+| Variable | Service | Purpose |
+| --- | --- | --- |
+| `MONGO_URI` | Backend | MongoDB Atlas connection string |
+| `ADMIN_PASSWORD` | Backend | Admin login password; set a unique strong value |
+| `JWT_SECRET` | Backend | Signs admin sessions; use a long random secret |
+| `FRONTEND_URL` | Backend | Exact allowed frontend origin for CORS |
+| `VITE_API_URL` | Frontend | Backend API base URL, ending in `/api` |
+
+Set backend values in `backend/.env` for local development and in the Render service environment for production. Set `VITE_API_URL` in `frontend/.env` locally and in Vercel's project environment variables for production. Never commit real `.env` files or production secrets. The `.env.example` files contain placeholders or local defaults only.
+
+`FRONTEND_URL` must match the browser origin exactly, including `https://` and the hostname, with no path. Multiple allowed origins can be comma-separated. For production, set it to the deployed Vercel origin; do not leave it blank because an unset value allows requests from any origin.
+
+The backend health check returns HTTP 200 with `status: "ok"` and `database: "connected"` only after MongoDB connects. While the database is unavailable or still connecting, it returns HTTP 503 with `status: "starting"` and `database: "disconnected"`.
+
 ## 1. MongoDB Atlas
 
 1. Create a free MongoDB Atlas account and a free shared cluster.

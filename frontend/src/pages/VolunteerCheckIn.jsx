@@ -1,7 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { API_BASE_URL } from '../api';
 import { useParams } from 'react-router-dom';
+
+const calculateDistance = (latitude1, longitude1, latitude2, longitude2) => {
+  const radians = Math.PI / 180;
+  const latitudeDelta = (latitude2 - latitude1) * radians;
+  const longitudeDelta = (longitude2 - longitude1) * radians;
+  const haversine = Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(latitude1 * radians) * Math.cos(latitude2 * radians) *
+    Math.sin(longitudeDelta / 2) ** 2;
+
+  return Math.round(6371e3 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine)));
+};
 
 export default function VolunteerCheckIn() {
   const { eventId } = useParams();
@@ -10,6 +21,10 @@ export default function VolunteerCheckIn() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
+  const [location, setLocation] = useState(null);
+  const [locationError, setLocationError] = useState('');
+  const [watchingLocation, setWatchingLocation] = useState(false);
+  const locationWatch = useRef(null);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -34,61 +49,101 @@ export default function VolunteerCheckIn() {
     loadEvent();
   }, [eventId]);
 
+  useEffect(() => () => {
+    if (locationWatch.current !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(locationWatch.current);
+    }
+  }, []);
+
+  const stopLocationTracking = () => {
+    if (locationWatch.current !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(locationWatch.current);
+      locationWatch.current = null;
+    }
+    setWatchingLocation(false);
+  };
+
+  const startLocationTracking = () => {
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation is not supported by your browser.');
+      return;
+    }
+
+    setLocationError('');
+    setWatchingLocation(true);
+    locationWatch.current = navigator.geolocation.watchPosition(
+      ({ coords }) => setLocation({
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        accuracy: coords.accuracy
+      }),
+      () => {
+        setLocationError('Location access failed. Allow GPS access and try again.');
+        stopLocationTracking();
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+    );
+  };
+
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   const handleConfirm = async (e) => {
     e.preventDefault();
-    setLoading(true);
     setError('');
-    
-    if (!navigator.geolocation) {
-      setError('Geolocation is not supported by your browser');
-      setLoading(false);
+
+    if (!location) {
+      setError('Check your location before marking attendance.');
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const { latitude, longitude, accuracy } = position.coords;
-        
-        try {
-          const activeEvent = event || (await axios.get(`${API_BASE_URL}/events/active`)).data;
-          const selectedEventId = activeEvent._id;
+    setLoading(true);
+    try {
+      const activeEvent = event || (await axios.get(`${API_BASE_URL}/events/active`)).data;
+      const selectedEventId = activeEvent._id;
 
-          let deviceId = localStorage.getItem('device_id');
-          if (!deviceId) {
-            deviceId = 'DVC-' + Math.random().toString(36).substr(2, 9).toUpperCase();
-            localStorage.setItem('device_id', deviceId);
-          }
-
-          const submitRes = await axios.post(`${API_BASE_URL}/attendance/mark`, {
-            name: formData.name,
-            regNumber: formData.regNumber,
-            course: formData.course,
-            section: formData.section,
-            code: formData.code,
-            event_id: selectedEventId,
-            latitude,
-            longitude,
-            accuracy,
-            device_id: deviceId
-          });
-
-          setResult(submitRes.data);
-          setStep(2);
-        } catch (err) {
-          setError(err.response?.data?.message || 'Failed to submit attendance');
-        }
-        setLoading(false);
-      },
-      () => {
-        setError('Please allow location access to mark attendance.');
-        setLoading(false);
+      let deviceId = localStorage.getItem('device_id');
+      if (!deviceId) {
+        deviceId = 'DVC-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+        localStorage.setItem('device_id', deviceId);
       }
-    );
+
+      const submitRes = await axios.post(`${API_BASE_URL}/attendance/mark`, {
+        name: formData.name,
+        regNumber: formData.regNumber,
+        course: formData.course,
+        section: formData.section,
+        code: formData.code,
+        event_id: selectedEventId,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy,
+        device_id: deviceId
+      });
+
+      setResult(submitRes.data);
+      setStep(2);
+      stopLocationTracking();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to submit attendance');
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const distanceToVenue = location && event?.location
+    ? calculateDistance(event.location.latitude, event.location.longitude, location.latitude, location.longitude)
+    : null;
+  const withinReliableRadius = distanceToVenue !== null &&
+    distanceToVenue + location.accuracy <= event.location.radius;
+  const accuracyStyle = !location
+    ? 'border-gray-200 bg-gray-50 text-gray-700'
+    : location.accuracy < 50
+      ? 'border-green-200 bg-green-50 text-green-800'
+      : location.accuracy < 100
+        ? 'border-yellow-200 bg-yellow-50 text-yellow-800'
+        : 'border-red-200 bg-red-50 text-red-800';
 
   return (
     <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
@@ -103,6 +158,29 @@ export default function VolunteerCheckIn() {
 
           {step === 1 && event?.status === 'open' && (
             <form onSubmit={handleConfirm} className="space-y-4">
+              <div className={`rounded-lg border p-3 text-sm ${accuracyStyle}`} aria-live="polite">
+                {!location ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <span>{locationError || 'Check your GPS before submitting.'}</span>
+                    <button type="button" onClick={startLocationTracking} disabled={watchingLocation}
+                      className="shrink-0 rounded-md bg-white px-3 py-2 font-semibold shadow-sm disabled:opacity-60">
+                      {watchingLocation ? 'Locating…' : 'Check location'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <p className="font-semibold">GPS accuracy: about {Math.round(location.accuracy)}m</p>
+                    <p>{distanceToVenue}m from venue · radius {event.location.radius}m</p>
+                    <p className="text-xs">
+                      {withinReliableRadius
+                        ? 'Location estimate fits within the venue radius.'
+                        : 'Your location may need admin review. Move closer or wait for a better GPS signal.'}
+                    </p>
+                    {locationError && <p className="text-xs">{locationError}</p>}
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
                 <input type="text" name="name" value={formData.name} onChange={handleChange} required
