@@ -1,5 +1,6 @@
 const Event = require('../models/Event');
 const EventCode = require('../models/EventCode');
+const crypto = require('crypto');
 
 const syncEventStatuses = async () => {
   const now = new Date();
@@ -59,7 +60,14 @@ exports.createEvent = async (req, res) => {
       return res.status(400).json({ message: 'Valid dates are required and close time must be after open time' });
     }
 
-    if (open_now) {
+    const now = new Date();
+    const status = now >= eventCloseTime
+      ? 'closed'
+      : open_now && now >= eventOpenTime
+        ? 'open'
+        : 'upcoming';
+
+    if (status === 'open') {
       await Event.updateMany({ status: 'open' }, { status: 'closed' });
     }
 
@@ -70,7 +78,7 @@ exports.createEvent = async (req, res) => {
       open_time: eventOpenTime,
       close_time: eventCloseTime,
       location,
-      status: open_now ? 'open' : 'upcoming'
+      status
     });
 
     res.status(201).json(event);
@@ -103,26 +111,29 @@ exports.getCurrentCode = async (req, res) => {
       valid_until: { $gte: now }
     });
 
-    if (!currentCode) {
-      const code = Math.floor(1000 + Math.random() * 9000).toString();
+    if (!currentCode || !currentCode.token || !/^\d{6}$/.test(currentCode.code)) {
+      const code = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
+      const token = crypto.randomBytes(32).toString('hex');
       const valid_from = now;
-      const valid_until = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
+      const valid_until = new Date(now.getTime() + 30 * 1000);
 
       await EventCode.deleteMany({ event_id: eventId });
 
       currentCode = await EventCode.create({
         event_id: eventId,
         code,
+        token,
         valid_from,
         valid_until
       });
     }
 
-    const secondsLeft = Math.round((new Date(currentCode.valid_until) - now) / 1000);
+    const secondsLeft = Math.ceil((new Date(currentCode.valid_until) - now) / 1000);
 
     res.json({
       code: currentCode.code,
-      expires_in: secondsLeft > 0 ? secondsLeft : 300
+      token: currentCode.token,
+      expires_in: Math.max(1, secondsLeft)
     });
   } catch (error) {
     console.error("Error in getCurrentCode:", error.message);

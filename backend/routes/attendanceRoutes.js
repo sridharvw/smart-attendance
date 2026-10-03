@@ -1,12 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const adminAuth = require('../middleware/adminAuth');
-const { getVolunteer, getDirectory, markAttendance, getLiveAttendance, updateAttendanceStatus, exportAttendanceCSV } = require('../controllers/attendanceController');
+const { getVolunteer, getDirectory, markAttendance, addManualAttendance, getLiveAttendance, updateAttendanceStatus, exportAttendanceCSV } = require('../controllers/attendanceController');
 
 // Existing routes...
 router.get('/volunteer/:register_number', getVolunteer);
 router.get('/directory', adminAuth, getDirectory);
 router.post('/mark', markAttendance);
+router.post('/manual', adminAuth, addManualAttendance);
 router.get('/live/:eventId', adminAuth, getLiveAttendance);
 router.patch('/:attendanceId/status', adminAuth, updateAttendanceStatus);
 

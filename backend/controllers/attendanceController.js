@@ -103,10 +103,14 @@ exports.getVolunteer = async (req, res) => {
 
 exports.markAttendance = async (req, res) => {
   try {
-    const { regNumber, name, course, section, event_id, latitude, longitude, accuracy, device_id, code } = req.body;
+    const { regNumber, name, course, section, event_id, latitude, longitude, accuracy, device_id, code, token } = req.body;
 
     const gpsAccuracy = typeof accuracy === 'number' ? accuracy : NaN;
-    if (!regNumber || !name || !course || !section || !code || !Number.isFinite(Number(latitude)) || !Number.isFinite(Number(longitude)) || !Number.isFinite(gpsAccuracy) || gpsAccuracy < 0) {
+    const numericLatitude = Number(latitude);
+    const numericLongitude = Number(longitude);
+    const hasValidCode = typeof code === 'string' && /^\d{6}$/.test(code);
+    const hasValidToken = typeof token === 'string' && /^[a-f0-9]{64}$/i.test(token);
+    if (!regNumber || !name || !course || !section || (!hasValidCode && !hasValidToken) || (hasValidCode && hasValidToken) || !device_id || !Number.isFinite(numericLatitude) || numericLatitude < -90 || numericLatitude > 90 || !Number.isFinite(numericLongitude) || numericLongitude < -180 || numericLongitude > 180 || !Number.isFinite(gpsAccuracy) || gpsAccuracy < 0 || gpsAccuracy > 100) {
       return res.status(400).json({ message: 'Complete student details and a valid location with GPS accuracy are required' });
     }
     
@@ -126,13 +130,23 @@ exports.markAttendance = async (req, res) => {
     // Verify rotating code
     const validCode = await EventCode.findOne({
       event_id: event._id,
-      code: code,
+      ...(hasValidToken ? { token } : { code }),
       valid_from: { $lte: now },
       valid_until: { $gte: now }
     });
 
     if (!validCode) {
-      return res.status(400).json({ message: 'Invalid or expired attendance code' });
+      return res.status(400).json({ message: 'The meeting QR or code has expired or is invalid. Scan or enter the current credential and try again.' });
+    }
+
+    const distance = calculateDistance(
+      event.location.latitude,
+      event.location.longitude,
+      numericLatitude,
+      numericLongitude
+    );
+    if (!isWithinReliableGeofence(distance, gpsAccuracy, event.location.radius)) {
+      return res.status(403).json({ message: 'Check-in denied. Move inside the meeting area and retry with an accurate GPS signal.' });
     }
 
     // Find or auto-create user
@@ -154,16 +168,7 @@ exports.markAttendance = async (req, res) => {
     }
 
     // Calculate location distance
-    const distance = calculateDistance(
-      event.location.latitude,
-      event.location.longitude,
-      latitude,
-      longitude
-    );
-
-    let status = isWithinReliableGeofence(distance, gpsAccuracy, event.location.radius)
-      ? 'present'
-      : 'needs_review';
+    let status = 'present';
 
     // Check for device fingerprint anomaly (shared device check)
     const existingDevice = await Attendance.findOne({ event_id, device_id });
@@ -191,6 +196,52 @@ exports.markAttendance = async (req, res) => {
   }
 };
 
+exports.addManualAttendance = async (req, res) => {
+  try {
+    const { event_id, regNumber, name, course, section, status = 'present' } = req.body;
+    if (!event_id || !regNumber || !name || !course || !section || !['present', 'absent'].includes(status)) {
+      return res.status(400).json({ message: 'Meeting, volunteer details, and a valid attendance status are required' });
+    }
+
+    const event = await Event.findById(event_id);
+    if (!event) return res.status(404).json({ message: 'Meeting not found' });
+
+    const normalizedRegNumber = regNumber.trim().toUpperCase();
+    let user = await User.findOne({ register_number: normalizedRegNumber });
+    if (!user) {
+      user = await User.create({
+        register_number: normalizedRegNumber,
+        name: name.trim(),
+        course: course.trim(),
+        semester: section.trim(),
+        role: 'volunteer'
+      });
+    }
+
+    let attendance = await Attendance.findOne({ event_id, user_id: user._id });
+    const isUpdate = Boolean(attendance);
+    if (attendance) {
+      attendance.status = status;
+      attendance.source = 'admin';
+      attendance.override_reason = 'Manually recorded by admin';
+      await attendance.save();
+    } else {
+      attendance = await Attendance.create({
+        event_id,
+        user_id: user._id,
+        status,
+        source: 'admin',
+        override_reason: 'Manually recorded by admin'
+      });
+    }
+
+    await attendance.populate('user_id', 'name register_number course semester');
+    res.status(isUpdate ? 200 : 201).json(attendance);
+  } catch (error) {
+    res.status(500).json({ message: 'Could not save manual attendance', error: error.message });
+  }
+};
+
 // 3. Fetch live attendance for the admin dashboard
 exports.getLiveAttendance = async (req, res) => {
   try {
@@ -211,7 +262,7 @@ exports.updateAttendanceStatus = async (req, res) => {
     const { attendanceId } = req.params;
     const { status, override_reason } = req.body; // Extract the new reason field
 
-    if (!['present', 'rejected'].includes(status)) {
+    if (!['present', 'absent', 'rejected'].includes(status)) {
       return res.status(400).json({ message: 'Invalid status value' });
     }
 
@@ -222,7 +273,7 @@ exports.updateAttendanceStatus = async (req, res) => {
         override_reason: override_reason || 'No reason provided' 
       },
       { returnDocument: 'after' }
-    ).populate('user_id', 'name register_number');
+    ).populate('user_id', 'name register_number course semester');
 
     if (!updated) {
       return res.status(404).json({ message: 'Attendance record not found' });

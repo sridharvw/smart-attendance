@@ -9,6 +9,12 @@ import { setAdminToken } from './api';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('adminTheme') === 'dark');
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDarkMode);
+    localStorage.setItem('adminTheme', isDarkMode ? 'dark' : 'light');
+  }, [isDarkMode]);
 
   useEffect(() => {
     const token = localStorage.getItem('adminToken');
@@ -31,16 +37,16 @@ function App() {
         {/* Protected Admin Route */}
         <Route path="/admin" element={
           isAuthenticated ? (
-            <AdminDashboard onLogout={() => setIsAuthenticated(false)} />
+            <AdminDashboard onLogout={() => setIsAuthenticated(false)} isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(value => !value)} />
           ) : (
             <AdminLogin onLogin={() => setIsAuthenticated(true)} />
           )
         } />
         <Route path="/admin/events" element={
-          isAuthenticated ? <AdminEvents onLogout={() => setIsAuthenticated(false)} /> : <AdminLogin onLogin={() => setIsAuthenticated(true)} />
+          isAuthenticated ? <AdminEvents onLogout={() => setIsAuthenticated(false)} isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(value => !value)} /> : <AdminLogin onLogin={() => setIsAuthenticated(true)} />
         } />
         <Route path="/admin/directory" element={
-          isAuthenticated ? <AdminDirectory onLogout={() => setIsAuthenticated(false)} /> : <AdminLogin onLogin={() => setIsAuthenticated(true)} />
+          isAuthenticated ? <AdminDirectory onLogout={() => setIsAuthenticated(false)} isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(value => !value)} /> : <AdminLogin onLogin={() => setIsAuthenticated(true)} />
         } />
       </Routes>
     </Router>

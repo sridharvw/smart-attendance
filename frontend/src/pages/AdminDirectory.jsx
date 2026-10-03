@@ -4,7 +4,7 @@ import { Download, Search, Users } from 'lucide-react';
 import { API_BASE_URL } from '../api';
 import AdminNav from '../components/AdminNav';
 
-export default function AdminDirectory({ onLogout }) {
+export default function AdminDirectory({ onLogout, isDarkMode, onToggleDarkMode }) {
   const [students, setStudents] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -55,7 +55,7 @@ export default function AdminDirectory({ onLogout }) {
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
       <div className="mx-auto max-w-6xl">
-        <AdminNav onLogout={onLogout} />
+        <AdminNav onLogout={onLogout} isDarkMode={isDarkMode} onToggleDarkMode={onToggleDarkMode} />
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-semibold uppercase tracking-wider text-blue-600">Cumulative Tracker</p>

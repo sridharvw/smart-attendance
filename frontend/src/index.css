@@ -1,1 +1,51 @@
 @import "tailwindcss";
+
+html.dark {
+	color-scheme: dark;
+	background: #111923;
+}
+
+html.dark body,
+html.dark .bg-gray-50,
+html.dark .bg-gray-100 {
+	background-color: #111923;
+}
+
+html.dark .bg-white {
+	background-color: #19232f;
+}
+
+html.dark .text-gray-900,
+html.dark .text-gray-800,
+html.dark .text-gray-700 {
+	color: #e5edf5;
+}
+
+html.dark .text-gray-600,
+html.dark .text-gray-500,
+html.dark .text-gray-400 {
+	color: #a8b5c4;
+}
+
+html.dark .border-gray-100,
+html.dark .border-gray-200,
+html.dark .border-gray-300 {
+	border-color: #344253;
+}
+
+html.dark .divide-gray-100 > :not(:last-child) {
+	border-color: #293544;
+}
+
+html.dark [class~="hover:bg-gray-50"]:hover,
+html.dark [class~="hover:bg-gray-100"]:hover {
+	background-color: #243140;
+}
+
+html.dark input:not([type="checkbox"]),
+html.dark select,
+html.dark textarea {
+	border-color: #45566a;
+	background-color: #111923;
+	color: #e5edf5;
+}

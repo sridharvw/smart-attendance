@@ -1,14 +1,13 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { AlertTriangle, CalendarPlus, CheckCircle2, Copy, Crosshair, Download, Search, X, XCircle, Users, MapPin, RefreshCw } from 'lucide-react';
-import { QRCodeCanvas } from 'qrcode.react';
+import { AlertTriangle, CalendarPlus, Check, CheckCircle2, Copy, Crosshair, Download, Search, UserPlus, X, XCircle, Users, MapPin, RefreshCw } from 'lucide-react';
 import { API_BASE_URL } from '../api';
 import AdminNav from '../components/AdminNav';
 
 const getInitialForm = () => {
   const now = new Date();
   const later = new Date(now.getTime() + 60 * 60 * 1000);
-  const date = now.toISOString().slice(0, 10);
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const time = value => value.toTimeString().slice(0, 5);
 
   return {
@@ -24,7 +23,7 @@ const getInitialForm = () => {
   };
 };
 
-export default function AdminEvents({ onLogout }) {
+export default function AdminEvents({ onLogout, isDarkMode, onToggleDarkMode }) {
   const [form, setForm] = useState(getInitialForm);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -40,6 +39,10 @@ export default function AdminEvents({ onLogout }) {
   const [attendanceError, setAttendanceError] = useState('');
   const [attendeeQuery, setAttendeeQuery] = useState('');
   const [attendanceFilter, setAttendanceFilter] = useState('all');
+  const [showAddStudent, setShowAddStudent] = useState(false);
+  const [addingStudent, setAddingStudent] = useState(false);
+  const [statusSavingId, setStatusSavingId] = useState(null);
+  const [manualStudent, setManualStudent] = useState({ name: '', regNumber: '', course: '', section: '', status: 'present' });
   const meetingUrl = eventId => `${window.location.origin}${import.meta.env.BASE_URL}meeting/${eventId}`;
 
   const latitude = Number(form.latitude);
@@ -115,6 +118,41 @@ export default function AdminEvents({ onLogout }) {
     }
   };
 
+  const addManualStudent = async event => {
+    event.preventDefault();
+    setAddingStudent(true);
+    setAttendanceError('');
+    try {
+      const response = await axios.post(`${API_BASE_URL}/attendance/manual`, {
+        ...manualStudent,
+        event_id: selectedEvent._id
+      });
+      setSelectedAttendance(previous => [response.data, ...previous.filter(record => record._id !== response.data._id)]);
+      setManualStudent({ name: '', regNumber: '', course: '', section: '', status: 'present' });
+      setShowAddStudent(false);
+    } catch (requestError) {
+      setAttendanceError(requestError.response?.data?.message || 'Could not add this student to the meeting');
+    } finally {
+      setAddingStudent(false);
+    }
+  };
+
+  const updateMeetingAttendance = async (record, status) => {
+    setStatusSavingId(record._id);
+    setAttendanceError('');
+    try {
+      const response = await axios.patch(`${API_BASE_URL}/attendance/${record._id}/status`, {
+        status,
+        override_reason: `Marked ${status} by admin`
+      });
+      setSelectedAttendance(previous => previous.map(item => item._id === record._id ? response.data.updated : item));
+    } catch (requestError) {
+      setAttendanceError(requestError.response?.data?.message || 'Could not update attendance');
+    } finally {
+      setStatusSavingId(null);
+    }
+  };
+
   const downloadAttendance = eventId => {
     axios.get(`${API_BASE_URL}/attendance/export/${eventId}`, { responseType: 'blob' })
       .then(response => {
@@ -182,7 +220,7 @@ export default function AdminEvents({ onLogout }) {
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
       <div className="mx-auto max-w-6xl">
-        <AdminNav onLogout={onLogout} />
+        <AdminNav onLogout={onLogout} isDarkMode={isDarkMode} onToggleDarkMode={onToggleDarkMode} />
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-semibold uppercase tracking-wider text-blue-600">Event Manager</p>
@@ -200,10 +238,9 @@ export default function AdminEvents({ onLogout }) {
 
         {createdEvent && (
           <div className="mb-6 flex flex-wrap items-center gap-5 rounded-xl border border-green-200 bg-green-50 p-5">
-            <QRCodeCanvas value={meetingUrl(createdEvent._id)} size={132} includeMargin />
             <div className="min-w-0 flex-1">
               <h2 className="font-bold text-green-900">Meeting link ready</h2>
-              <p className="mt-1 text-sm text-green-800">Share this link or QR code. It opens this meeting directly.</p>
+              <p className="mt-1 text-sm text-green-800">Volunteers must scan the live rotating QR on the dashboard when they arrive.</p>
               <div className="mt-3 flex max-w-xl items-center gap-2 rounded-lg border border-green-200 bg-white p-2">
                 <input readOnly value={meetingUrl(createdEvent._id)} className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none" />
                 <button type="button" title="Copy meeting link" onClick={() => navigator.clipboard.writeText(meetingUrl(createdEvent._id))} className="rounded-md p-2 text-green-700 hover:bg-green-50"><Copy size={16} /></button>
@@ -334,10 +371,31 @@ export default function AdminEvents({ onLogout }) {
               {attendanceLoading ? <p className="py-12 text-center text-gray-500">Loading attendance records...</p> : (
                 <>
                   <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <div className="rounded-lg border border-gray-200 p-4"><p className="text-xs font-semibold uppercase text-gray-500">Total scans</p><p className="mt-1 text-2xl font-bold text-gray-900">{selectedAttendance.length}</p></div>
+                    <div className="rounded-lg border border-gray-200 p-4"><p className="text-xs font-semibold uppercase text-gray-500">Meeting records</p><p className="mt-1 text-2xl font-bold text-gray-900">{selectedAttendance.length}</p></div>
                     <div className="rounded-lg border border-green-200 bg-green-50 p-4"><p className="text-xs font-semibold uppercase text-green-700">Present</p><p className="mt-1 text-2xl font-bold text-green-700">{selectedAttendance.filter(record => record.status === 'present').length}</p></div>
                     <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4"><p className="text-xs font-semibold uppercase text-yellow-700">Review</p><p className="mt-1 text-2xl font-bold text-yellow-700">{selectedAttendance.filter(record => record.status === 'needs_review').length}</p></div>
-                    <div className="rounded-lg border border-red-200 bg-red-50 p-4"><p className="text-xs font-semibold uppercase text-red-700">Rejected</p><p className="mt-1 text-2xl font-bold text-red-700">{selectedAttendance.filter(record => record.status === 'rejected').length}</p></div>
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-4"><p className="text-xs font-semibold uppercase text-red-700">Absent</p><p className="mt-1 text-2xl font-bold text-red-700">{selectedAttendance.filter(record => record.status === 'absent').length}</p></div>
+                  </div>
+
+                  <div className="mb-4">
+                    <button type="button" onClick={() => setShowAddStudent(value => !value)} className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+                      <UserPlus size={16} /> {showAddStudent ? 'Cancel add student' : 'Add student'}
+                    </button>
+                    {showAddStudent && (
+                      <form onSubmit={addManualStudent} className="mt-3 grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                        <input aria-label="Student name" value={manualStudent.name} onChange={event => setManualStudent(previous => ({ ...previous, name: event.target.value }))} placeholder="Full name" required className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm" />
+                        <input aria-label="Register number" value={manualStudent.regNumber} onChange={event => setManualStudent(previous => ({ ...previous, regNumber: event.target.value }))} placeholder="Register number" required className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm" />
+                        <input aria-label="Course" value={manualStudent.course} onChange={event => setManualStudent(previous => ({ ...previous, course: event.target.value }))} placeholder="Course" required className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm" />
+                        <input aria-label="Semester or section" value={manualStudent.section} onChange={event => setManualStudent(previous => ({ ...previous, section: event.target.value }))} placeholder="Semester / section" required className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm" />
+                        <select aria-label="Initial attendance status" value={manualStudent.status} onChange={event => setManualStudent(previous => ({ ...previous, status: event.target.value }))} className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                          <option value="present">Present</option>
+                          <option value="absent">Absent</option>
+                        </select>
+                        <button type="submit" disabled={addingStudent} className="flex items-center justify-center gap-2 rounded-md bg-green-700 px-3 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:opacity-50">
+                          <Check size={16} /> {addingStudent ? 'Saving...' : 'Add to this meeting'}
+                        </button>
+                      </form>
+                    )}
                   </div>
 
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -350,6 +408,7 @@ export default function AdminEvents({ onLogout }) {
                         <option value="all">All statuses</option>
                         <option value="present">Present</option>
                         <option value="needs_review">Needs review</option>
+                        <option value="absent">Absent</option>
                         <option value="rejected">Rejected</option>
                       </select>
                       <button type="button" onClick={() => downloadAttendance(selectedEvent._id)} title="Download attendance CSV" className="flex items-center gap-2 rounded-lg bg-gray-800 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-900"><Download size={16} /> CSV</button>
@@ -366,10 +425,16 @@ export default function AdminEvents({ onLogout }) {
                           <div><p className="font-semibold text-gray-900">{record.user_id?.name || 'Unknown volunteer'}</p><p className="text-sm text-gray-500">{record.user_id?.register_number || 'No register number'}</p></div>
                           <p className="text-sm text-gray-600">{record.user_id?.course || 'Not recorded'} <span className="text-gray-400">· {record.user_id?.semester || 'N/A'}</span></p>
                           <p className="text-sm text-gray-600">{new Date(record.createdAt).toLocaleString()}</p>
-                          <span className={`flex w-fit items-center gap-1 rounded-full px-2 py-1 text-xs font-bold uppercase ${record.status === 'present' ? 'bg-green-100 text-green-700' : record.status === 'needs_review' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
-                            {record.status === 'present' ? <CheckCircle2 size={13} /> : record.status === 'needs_review' ? <AlertTriangle size={13} /> : <XCircle size={13} />}
-                            {record.status.replace('_', ' ')}
-                          </span>
+                          <div className="space-y-2">
+                            <span className={`flex w-fit items-center gap-1 rounded-full px-2 py-1 text-xs font-bold uppercase ${record.status === 'present' ? 'bg-green-100 text-green-700' : record.status === 'needs_review' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                              {record.status === 'present' ? <CheckCircle2 size={13} /> : record.status === 'needs_review' ? <AlertTriangle size={13} /> : <XCircle size={13} />}
+                              {record.status.replace('_', ' ')}
+                            </span>
+                            <div className="flex flex-wrap gap-1">
+                              <button type="button" disabled={statusSavingId === record._id || record.status === 'present'} onClick={() => updateMeetingAttendance(record, 'present')} className="rounded bg-green-700 px-2 py-1 text-xs font-semibold text-white disabled:opacity-40">Present</button>
+                              <button type="button" disabled={statusSavingId === record._id || record.status === 'absent'} onClick={() => updateMeetingAttendance(record, 'absent')} className="rounded bg-red-700 px-2 py-1 text-xs font-semibold text-white disabled:opacity-40">Absent</button>
+                            </div>
+                          </div>
                         </div>
                       ))}
                       {!filteredAttendance.length && <p className="p-8 text-center text-sm text-gray-500">No attendance records match this filter.</p>}

@@ -5,10 +5,10 @@ import { API_BASE_URL } from '../api';
 import AdminNav from '../components/AdminNav';
 import { Check, Copy, Download, X } from 'lucide-react';
 
-export default function AdminDashboard({ onLogout }) {
+export default function AdminDashboard({ onLogout, isDarkMode, onToggleDarkMode }) {
   const [event, setEvent] = useState(null);
   const [attendances, setAttendances] = useState([]);
-  const [codeData, setCodeData] = useState({ code: '----', expires_in: 300 });
+  const [codeData, setCodeData] = useState({ code: '------', token: '', expires_in: 30 });
   const [loading, setLoading] = useState(true);
   const [reviewingId, setReviewingId] = useState(null);
   const [selectedReviewIds, setSelectedReviewIds] = useState([]);
@@ -27,7 +27,7 @@ export default function AdminDashboard({ onLogout }) {
       setCodeData((prev) => {
         if (prev.expires_in <= 1) {
           fetchCode(event?._id);
-          return { ...prev, expires_in: 300 };
+          return { ...prev, expires_in: 30 };
         }
         return { ...prev, expires_in: prev.expires_in - 1 };
       });
@@ -58,7 +58,7 @@ export default function AdminDashboard({ onLogout }) {
       if (error.response?.status === 404) {
         setEvent(null);
         setAttendances([]);
-        setCodeData({ code: '----', expires_in: 300 });
+          setCodeData({ code: '------', token: '', expires_in: 30 });
       } else {
         console.error('Error fetching dashboard data', error);
       }
@@ -79,7 +79,7 @@ export default function AdminDashboard({ onLogout }) {
   };
 
   const handleStatusUpdate = async (attendanceId, newStatus) => {
-  const reason = window.prompt(`Please enter a reason to ${newStatus === 'present' ? 'ACCEPT' : 'REJECT'} this check-in:`);
+  const reason = window.prompt(`Reason to mark this check-in ${newStatus === 'present' ? 'present' : 'absent'}:`);
   
   // If the admin clicks Cancel or leaves it blank, stop the update
   if (!reason || reason.trim() === '') {
@@ -119,7 +119,7 @@ export default function AdminDashboard({ onLogout }) {
       .map(record => record._id);
     if (!selectedIds.length) return;
 
-    const actionLabel = newStatus === 'present' ? 'accept' : 'reject';
+    const actionLabel = newStatus === 'present' ? 'mark present' : 'mark absent';
     const reason = window.prompt(`Reason to ${actionLabel} ${selectedIds.length} selected check-ins:`);
     if (!reason?.trim()) return;
 
@@ -173,7 +173,7 @@ export default function AdminDashboard({ onLogout }) {
     return (
       <div className="min-h-screen bg-gray-50 p-6">
         <div className="mx-auto max-w-4xl">
-          <AdminNav onLogout={onLogout} />
+          <AdminNav onLogout={onLogout} isDarkMode={isDarkMode} onToggleDarkMode={onToggleDarkMode} />
           <div className="rounded-xl border border-gray-200 bg-white p-10 text-center shadow-sm">
             <h1 className="text-2xl font-bold text-gray-900">No active meeting</h1>
             <p className="mt-2 text-gray-500">Create a new meeting to open attendance and generate its link and QR code.</p>
@@ -188,7 +188,7 @@ export default function AdminDashboard({ onLogout }) {
 
   const presentCount = attendances.filter(a => a.status === 'present').length;
   const reviewCount = attendances.filter(a => a.status === 'needs_review').length;
-  const rejectedCount = attendances.filter(a => a.status === 'rejected').length;
+  const absentCount = attendances.filter(a => a.status === 'absent').length;
   const reviewIds = attendances.filter(a => a.status === 'needs_review').map(a => a._id);
   const selectedReviewCount = reviewIds.filter(id => selectedReviewIds.includes(id)).length;
   const allReviewsSelected = reviewIds.length > 0 && selectedReviewCount === reviewIds.length;
@@ -266,7 +266,7 @@ export default function AdminDashboard({ onLogout }) {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-4xl mx-auto">
-        <AdminNav onLogout={onLogout} />
+        <AdminNav onLogout={onLogout} isDarkMode={isDarkMode} onToggleDarkMode={onToggleDarkMode} />
         {/* Header */}
         <div className="bg-white rounded-xl shadow-sm p-6 mb-6 border border-gray-100 flex justify-between items-center">
           <div>
@@ -287,15 +287,16 @@ export default function AdminDashboard({ onLogout }) {
           </div>
         </div>
 
-        {/* Rotating Code Card */}
-        <div className="bg-blue-600 text-white rounded-xl shadow-sm p-6 mb-6 flex justify-between items-center">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-5 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
           <div>
-            <div className="text-blue-100 text-sm uppercase tracking-wider font-semibold">Current Rotating Code</div>
-            <div className="text-5xl font-mono font-extrabold tracking-widest mt-2">{codeData.code}</div>
+            <h2 className="text-lg font-bold text-gray-900">Live check-in QR</h2>
+            <p className="mt-1 max-w-xl text-sm text-gray-600">Volunteers can scan this QR in the form or enter its six-digit code. Both refresh every 30 seconds; check-in is limited to the meeting geofence.</p>
+            <p className="mt-3 text-sm font-semibold text-blue-700">Refreshes in {codeData.expires_in}s</p>
           </div>
-          <div className="text-right bg-blue-700/50 p-4 rounded-xl border border-blue-500/30">
-            <div className="text-xs text-blue-200">Changes in</div>
-            <div className="text-2xl font-bold font-mono">{codeData.expires_in}s</div>
+          <div className="rounded-lg border border-gray-200 bg-white p-3 text-center">
+            {codeData.token && <QRCodeCanvas value={`${meetingLink}?token=${encodeURIComponent(codeData.token)}`} size={180} includeMargin />}
+            <p className="mt-2 text-xs font-semibold text-gray-600">Or enter this code in the check-in form</p>
+            <p className="mt-1 font-mono text-2xl font-bold tracking-[0.25em] text-gray-900">{codeData.code}</p>
           </div>
         </div>
 
@@ -309,10 +310,6 @@ export default function AdminDashboard({ onLogout }) {
               <a href="/admin/events" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Manage meetings</a>
               <a href="/admin/directory" className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">Student directory</a>
             </div>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-white p-3 text-center">
-            <QRCodeCanvas value={meetingLink} size={132} includeMargin />
-            <p className="mt-2 text-xs font-semibold text-gray-600">Scan to check in</p>
           </div>
         </div>
 
@@ -341,8 +338,8 @@ export default function AdminDashboard({ onLogout }) {
             <div className="text-3xl font-bold text-red-600">{reviewCount}</div>
           </div>
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-            <div className="text-gray-500 text-sm font-medium">Rejected</div>
-            <div className="text-3xl font-bold text-red-700">{rejectedCount}</div>
+            <div className="text-gray-500 text-sm font-medium">Marked Absent</div>
+            <div className="text-3xl font-bold text-red-700">{absentCount}</div>
           </div>
         </div>
 
@@ -393,11 +390,11 @@ export default function AdminDashboard({ onLogout }) {
               </button>
               <button
                 type="button"
-                onClick={() => handleBulkAction('rejected')}
+                onClick={() => handleBulkAction('absent')}
                 disabled={selectedReviewCount === 0 || Boolean(reviewingId) || Boolean(bulkActionStatus)}
                 className="flex items-center gap-2 rounded-md bg-red-700 px-3 py-2 text-sm font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <X size={16} /> {bulkActionStatus === 'rejected' ? 'Rejecting…' : 'Reject selected'}
+                <X size={16} /> {bulkActionStatus === 'absent' ? 'Saving…' : 'Mark absent'}
               </button>
             </div>
           </div>
@@ -454,6 +451,9 @@ export default function AdminDashboard({ onLogout }) {
                     {record.status === 'needs_review' && (
                       <span className="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-bold uppercase">Needs Review</span>
                     )}
+                    {record.status === 'absent' && (
+                      <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold uppercase">Absent</span>
+                    )}
                     {record.status === 'rejected' && (
                       <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold uppercase">Rejected</span>
                     )}
@@ -466,14 +466,14 @@ export default function AdminDashboard({ onLogout }) {
                         onClick={() => handleStatusUpdate(record._id, 'present')}
                         className="bg-green-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-green-700 transition"
                       >
-                        {reviewingId === record._id ? 'Saving...' : 'Accept'}
+                        {reviewingId === record._id ? 'Saving...' : 'Present'}
                       </button>
                       <button 
                         disabled={reviewingId === record._id || Boolean(bulkActionStatus)}
-                        onClick={() => handleStatusUpdate(record._id, 'rejected')}
+                        onClick={() => handleStatusUpdate(record._id, 'absent')}
                         className="bg-red-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-red-700 transition"
                       >
-                        {reviewingId === record._id ? 'Saving...' : 'Reject'}
+                        {reviewingId === record._id ? 'Saving...' : 'Absent'}
                       </button>
                     </div>
                   )}

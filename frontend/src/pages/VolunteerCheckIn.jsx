@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
+import { Keyboard, QrCode } from 'lucide-react';
 import { API_BASE_URL } from '../api';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 
 const calculateDistance = (latitude1, longitude1, latitude2, longitude2) => {
   const radians = Math.PI / 180;
@@ -16,6 +17,12 @@ const calculateDistance = (latitude1, longitude1, latitude2, longitude2) => {
 
 export default function VolunteerCheckIn() {
   const { eventId } = useParams();
+  const [searchParams] = useSearchParams();
+  const [attendanceToken, setAttendanceToken] = useState(() => searchParams.get('token') || '');
+  const [verificationMethod, setVerificationMethod] = useState('qr');
+  const [isScanningQr, setIsScanningQr] = useState(false);
+  const [verificationError, setVerificationError] = useState('');
+  const [manualCode, setManualCode] = useState('');
   const [event, setEvent] = useState(null);
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -31,7 +38,6 @@ export default function VolunteerCheckIn() {
     regNumber: '',
     course: 'BCA',
     section: '',
-    code: ''
   });
 
   useEffect(() => {
@@ -48,6 +54,42 @@ export default function VolunteerCheckIn() {
 
     loadEvent();
   }, [eventId]);
+
+  useEffect(() => {
+    if (!isScanningQr || verificationMethod !== 'qr' || !event?._id) return undefined;
+
+    let scanner;
+    let cancelled = false;
+    import('html5-qrcode').then(({ Html5QrcodeScanner }) => {
+      if (cancelled) return;
+      scanner = new Html5QrcodeScanner('attendance-qr-reader', {
+        fps: 10,
+        qrbox: { width: 230, height: 230 },
+        rememberLastUsedCamera: true
+      }, false);
+      scanner.render(decodedText => {
+        try {
+          const scannedUrl = new URL(decodedText);
+          const matchesMeeting = scannedUrl.pathname.endsWith(`/meeting/${event._id}`);
+          const token = scannedUrl.searchParams.get('token');
+          if (scannedUrl.origin !== window.location.origin || !matchesMeeting || !token) {
+            setVerificationError('Scan the current QR displayed for this meeting.');
+            return;
+          }
+          setAttendanceToken(token);
+          setVerificationError('');
+          setIsScanningQr(false);
+        } catch {
+          setVerificationError('This QR is not a valid meeting check-in link.');
+        }
+      }, () => {});
+    }).catch(() => setVerificationError('Could not load the QR scanner. Allow camera access and retry.'));
+
+    return () => {
+      cancelled = true;
+      if (scanner) scanner.clear().catch(() => {});
+    };
+  }, [event?._id, isScanningQr, verificationMethod]);
 
   useEffect(() => () => {
     if (locationWatch.current !== null && navigator.geolocation) {
@@ -69,19 +111,32 @@ export default function VolunteerCheckIn() {
       return;
     }
 
+    if (!window.isSecureContext && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+      setLocationError('Location access requires HTTPS. Open this meeting using its secure link.');
+      return;
+    }
+
     setLocationError('');
     setWatchingLocation(true);
-    locationWatch.current = navigator.geolocation.watchPosition(
-      ({ coords }) => setLocation({
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        accuracy: coords.accuracy
-      }),
-      () => {
-        setLocationError('Location access failed. Allow GPS access and try again.');
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        setLocation({
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          accuracy: coords.accuracy
+        });
+        setWatchingLocation(false);
+      },
+      error => {
+        const message = error.code === error.PERMISSION_DENIED
+          ? 'Location permission is blocked. Allow location access in your browser settings, then retry.'
+          : error.code === error.TIMEOUT
+            ? 'GPS is taking too long to respond. Move to a place with a clearer signal and retry.'
+            : 'Your device could not determine its location. Turn on location services and retry.';
+        setLocationError(message);
         stopLocationTracking();
       },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 }
     );
   };
 
@@ -92,6 +147,12 @@ export default function VolunteerCheckIn() {
   const handleConfirm = async (e) => {
     e.preventDefault();
     setError('');
+
+    const verificationCredential = verificationMethod === 'qr' ? attendanceToken : manualCode.trim();
+    if (!verificationCredential) {
+      setError(verificationMethod === 'qr' ? 'Scan the current meeting QR before submitting.' : 'Enter the current six-digit meeting code.');
+      return;
+    }
 
     if (!location) {
       setError('Check your location before marking attendance.');
@@ -114,7 +175,7 @@ export default function VolunteerCheckIn() {
         regNumber: formData.regNumber,
         course: formData.course,
         section: formData.section,
-        code: formData.code,
+        ...(verificationMethod === 'qr' ? { token: verificationCredential } : { code: verificationCredential }),
         event_id: selectedEventId,
         latitude: location.latitude,
         longitude: location.longitude,
@@ -126,7 +187,12 @@ export default function VolunteerCheckIn() {
       setStep(2);
       stopLocationTracking();
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to submit attendance');
+      const serverMessage = err.response?.data?.message;
+      if (err.response?.status === 400 && /credential|expired|invalid/i.test(serverMessage || '')) {
+        if (verificationMethod === 'qr') setAttendanceToken('');
+        else setManualCode('');
+      }
+      setError(serverMessage || 'Failed to submit attendance');
     } finally {
       setLoading(false);
     }
@@ -158,13 +224,38 @@ export default function VolunteerCheckIn() {
 
           {step === 1 && event?.status === 'open' && (
             <form onSubmit={handleConfirm} className="space-y-4">
+              <div className="grid grid-cols-2 rounded-lg border border-gray-200 bg-gray-100 p-1" role="group" aria-label="Attendance verification method">
+                <button type="button" aria-pressed={verificationMethod === 'qr'} onClick={() => { setVerificationMethod('qr'); setVerificationError(''); }} className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold ${verificationMethod === 'qr' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}>
+                  <QrCode size={16} /> Scan QR
+                </button>
+                <button type="button" aria-pressed={verificationMethod === 'code'} onClick={() => { setVerificationMethod('code'); setVerificationError(''); setIsScanningQr(false); }} className={`flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold ${verificationMethod === 'code' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}>
+                  <Keyboard size={16} /> Enter code
+                </button>
+              </div>
+
+              {verificationMethod === 'qr' ? (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                  {attendanceToken ? <p className="font-semibold">Meeting QR accepted. It expires shortly.</p> : <p>Scan the live QR on the admin dashboard with your camera, or scan it here.</p>}
+                  {verificationError && <p className="mt-2 text-red-700" role="alert">{verificationError}</p>}
+                  {!attendanceToken && !isScanningQr && <button type="button" onClick={() => { setVerificationError(''); setIsScanningQr(true); }} className="mt-3 flex items-center gap-2 rounded-md bg-blue-700 px-3 py-2 font-semibold text-white hover:bg-blue-800"><QrCode size={16} /> Open camera scanner</button>}
+                  {isScanningQr && <div id="attendance-qr-reader" className="mt-3 overflow-hidden rounded-md bg-white" />}
+                </div>
+              ) : (
+                <div>
+                  <label htmlFor="meeting-code" className="mb-1 block text-sm font-medium text-gray-700">6-digit meeting code</label>
+                  <input id="meeting-code" type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={manualCode} onChange={event => setManualCode(event.target.value.replace(/\D/g, '').slice(0, 6))} required placeholder="Enter current code" className="w-full rounded-lg border border-gray-300 p-3 text-center text-xl font-bold tracking-[0.4em] outline-none focus:ring-2 focus:ring-blue-500" />
+                  <p className="mt-1 text-xs text-gray-500">Ask the admin for the code currently shown on the dashboard. It changes every 30 seconds.</p>
+                  {verificationError && <p className="mt-2 text-sm text-red-700" role="alert">{verificationError}</p>}
+                </div>
+              )}
+
               <div className={`rounded-lg border p-3 text-sm ${accuracyStyle}`} aria-live="polite">
                 {!location ? (
                   <div className="flex items-center justify-between gap-3">
                     <span>{locationError || 'Check your GPS before submitting.'}</span>
                     <button type="button" onClick={startLocationTracking} disabled={watchingLocation}
                       className="shrink-0 rounded-md bg-white px-3 py-2 font-semibold shadow-sm disabled:opacity-60">
-                      {watchingLocation ? 'Locating…' : 'Check location'}
+                      {watchingLocation ? 'Locating…' : locationError ? 'Retry location' : 'Check location'}
                     </button>
                   </div>
                 ) : (
@@ -174,9 +265,12 @@ export default function VolunteerCheckIn() {
                     <p className="text-xs">
                       {withinReliableRadius
                         ? 'Location estimate fits within the venue radius.'
-                        : 'Your location may need admin review. Move closer or wait for a better GPS signal.'}
+                        : 'Check-in is blocked until GPS accuracy and venue distance fit the meeting radius. Refresh GPS or move closer.'}
                     </p>
                     {locationError && <p className="text-xs">{locationError}</p>}
+                    <button type="button" onClick={startLocationTracking} disabled={watchingLocation} className="mt-2 rounded-md bg-white px-3 py-2 text-xs font-semibold text-blue-700 shadow-sm disabled:opacity-60">
+                      {watchingLocation ? 'Updating GPS...' : 'Refresh GPS'}
+                    </button>
                   </div>
                 )}
               </div>
@@ -207,14 +301,7 @@ export default function VolunteerCheckIn() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">4-Digit Attendance Code</label>
-                <input type="text" name="code" maxLength="4" value={formData.code} onChange={handleChange} required
-                  placeholder="Enter venue code"
-                  className="w-full border border-gray-300 rounded-lg p-3 text-center text-xl font-bold tracking-widest outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-
-              <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white font-bold py-3 mt-2 rounded-lg hover:bg-blue-700 transition">
+              <button type="submit" disabled={loading || (verificationMethod === 'qr' ? !attendanceToken : manualCode.length !== 6)} className="w-full bg-blue-600 text-white font-bold py-3 mt-2 rounded-lg hover:bg-blue-700 transition disabled:opacity-50">
                 {loading ? 'Verifying...' : 'Mark Attendance'}
               </button>
             </form>
