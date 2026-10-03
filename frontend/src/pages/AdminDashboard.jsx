@@ -8,7 +8,8 @@ import { Check, Copy, Download, X } from 'lucide-react';
 export default function AdminDashboard({ onLogout, isDarkMode, onToggleDarkMode }) {
   const [event, setEvent] = useState(null);
   const [attendances, setAttendances] = useState([]);
-  const [codeData, setCodeData] = useState({ code: '------', token: '', expires_in: 30 });
+  const [codeData, setCodeData] = useState({ code: '------', token: '', expires_in: 0 });
+  const [codeError, setCodeError] = useState('');
   const [loading, setLoading] = useState(true);
   const [reviewingId, setReviewingId] = useState(null);
   const [selectedReviewIds, setSelectedReviewIds] = useState([]);
@@ -25,9 +26,10 @@ export default function AdminDashboard({ onLogout, isDarkMode, onToggleDarkMode 
     // Refresh countdown every 1 second
     const codeInterval = setInterval(() => {
       setCodeData((prev) => {
+        if (!prev.token || !/^\d{6}$/.test(prev.code)) return prev;
         if (prev.expires_in <= 1) {
           fetchCode(event?._id);
-          return { ...prev, expires_in: 30 };
+          return { code: '------', token: '', expires_in: 0 };
         }
         return { ...prev, expires_in: prev.expires_in - 1 };
       });
@@ -58,7 +60,7 @@ export default function AdminDashboard({ onLogout, isDarkMode, onToggleDarkMode 
       if (error.response?.status === 404) {
         setEvent(null);
         setAttendances([]);
-          setCodeData({ code: '------', token: '', expires_in: 30 });
+          setCodeData({ code: '------', token: '', expires_in: 0 });
       } else {
         console.error('Error fetching dashboard data', error);
       }
@@ -70,11 +72,21 @@ export default function AdminDashboard({ onLogout, isDarkMode, onToggleDarkMode 
     try {
       if (!eventId) return;
       const res = await axios.get(`${API_BASE_URL}/events/${eventId}/code`);
-      if (res.data && res.data.code) {
-        setCodeData(res.data);
+      if (!/^\d{6}$/.test(res.data?.code || '') || !/^[a-f0-9]{64}$/i.test(res.data?.token || '') || !Number.isFinite(res.data?.expires_in)) {
+        setCodeData({ code: '------', token: '', expires_in: 0 });
+        setCodeError('The backend is not returning the latest QR and six-digit code. Redeploy the backend, then refresh this page.');
+        return;
       }
-    } catch (error) {
-      console.error('Error fetching code', error);
+      setCodeData(res.data);
+      setCodeError('');
+    } catch (requestError) {
+      setCodeData({ code: '------', token: '', expires_in: 0 });
+      const status = requestError.response?.status;
+      setCodeError(status === 401
+        ? 'Admin session expired. Sign out and sign in again to load the live QR and code.'
+        : status === 404 || status >= 500
+          ? 'The backend could not generate credentials. Deploy the latest backend, then refresh this page.'
+          : requestError.response?.data?.message || 'Could not load the live QR and code. Check the backend connection, then refresh.');
     }
   };
 
@@ -291,12 +303,14 @@ export default function AdminDashboard({ onLogout, isDarkMode, onToggleDarkMode 
           <div>
             <h2 className="text-lg font-bold text-gray-900">Live check-in QR</h2>
             <p className="mt-1 max-w-xl text-sm text-gray-600">Volunteers can scan this QR in the form or enter its six-digit code. Both refresh every 30 seconds; check-in is limited to the meeting geofence.</p>
-            <p className="mt-3 text-sm font-semibold text-blue-700">Refreshes in {codeData.expires_in}s</p>
+            {codeError
+              ? <p className="mt-3 text-sm font-semibold text-red-700" role="alert">{codeError}</p>
+              : <p className="mt-3 text-sm font-semibold text-blue-700">Refreshes in {codeData.expires_in}s</p>}
           </div>
           <div className="rounded-lg border border-gray-200 bg-white p-3 text-center">
             {codeData.token && <QRCodeCanvas value={`${meetingLink}?token=${encodeURIComponent(codeData.token)}`} size={180} includeMargin />}
             <p className="mt-2 text-xs font-semibold text-gray-600">Or enter this code in the check-in form</p>
-            <p className="mt-1 font-mono text-2xl font-bold tracking-[0.25em] text-gray-900">{codeData.code}</p>
+            <p className="mt-1 font-mono text-2xl font-bold tracking-[0.25em] text-gray-900">{/^\d{6}$/.test(codeData.code) ? codeData.code : '------'}</p>
           </div>
         </div>
 
