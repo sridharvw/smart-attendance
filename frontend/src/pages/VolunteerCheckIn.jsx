@@ -60,34 +60,50 @@ export default function VolunteerCheckIn() {
 
     let scanner;
     let cancelled = false;
-    import('html5-qrcode').then(({ Html5QrcodeScanner }) => {
+    import('html5-qrcode').then(({ Html5Qrcode }) => {
       if (cancelled) return;
-      scanner = new Html5QrcodeScanner('attendance-qr-reader', {
-        fps: 10,
-        qrbox: { width: 230, height: 230 },
-        rememberLastUsedCamera: true
-      }, false);
-      scanner.render(decodedText => {
-        try {
-          const scannedUrl = new URL(decodedText);
-          const matchesMeeting = scannedUrl.pathname.endsWith(`/meeting/${event._id}`);
-          const token = scannedUrl.searchParams.get('token');
-          if (scannedUrl.origin !== window.location.origin || !matchesMeeting || !token) {
-            setVerificationError('Scan the current QR displayed for this meeting.');
-            return;
+      scanner = new Html5Qrcode('attendance-qr-reader');
+      scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 230, height: 230 } },
+        decodedText => {
+          try {
+            const scannedUrl = new URL(decodedText);
+            const matchesMeeting = scannedUrl.pathname.endsWith(`/meeting/${event._id}`);
+            const token = scannedUrl.searchParams.get('token');
+            if (scannedUrl.origin !== window.location.origin || !matchesMeeting || !token) {
+              setVerificationError('Scan the current QR displayed for this meeting.');
+              return;
+            }
+            setAttendanceToken(token);
+            setVerificationError('');
+            setIsScanningQr(false);
+          } catch {
+            setVerificationError('This QR is not a valid meeting check-in link.');
           }
-          setAttendanceToken(token);
-          setVerificationError('');
+        },
+        () => {}
+      ).catch(error => {
+        if (!cancelled) {
+          const message = error?.name === 'NotAllowedError'
+            ? 'Camera permission is blocked. Allow camera access in your browser settings, then retry.'
+            : 'Could not start the camera. Check your camera and retry.';
+          setVerificationError(message);
           setIsScanningQr(false);
-        } catch {
-          setVerificationError('This QR is not a valid meeting check-in link.');
         }
-      }, () => {});
-    }).catch(() => setVerificationError('Could not load the QR scanner. Allow camera access and retry.'));
+      });
+    }).catch(() => {
+      if (!cancelled) {
+        setVerificationError('Could not load the camera scanner. Allow camera access and retry.');
+        setIsScanningQr(false);
+      }
+    });
 
     return () => {
       cancelled = true;
-      if (scanner) scanner.clear().catch(() => {});
+      if (scanner) {
+        scanner.stop().catch(() => {}).finally(() => scanner.clear());
+      }
     };
   }, [event?._id, isScanningQr, verificationMethod]);
 
@@ -235,9 +251,9 @@ export default function VolunteerCheckIn() {
 
               {verificationMethod === 'qr' ? (
                 <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-                  {attendanceToken ? <p className="font-semibold">Meeting QR accepted. It expires shortly.</p> : <p>Scan the live QR on the admin dashboard with your camera, or scan it here.</p>}
+                  {attendanceToken ? <p className="font-semibold">Meeting QR accepted. It expires shortly.</p> : <p>Tap below to allow camera access, then point your camera at the live meeting QR.</p>}
                   {verificationError && <p className="mt-2 text-red-700" role="alert">{verificationError}</p>}
-                  {!attendanceToken && !isScanningQr && <button type="button" onClick={() => { setVerificationError(''); setIsScanningQr(true); }} className="mt-3 flex items-center gap-2 rounded-md bg-blue-700 px-3 py-2 font-semibold text-white hover:bg-blue-800"><QrCode size={16} /> Open camera scanner</button>}
+                  {!attendanceToken && !isScanningQr && <button type="button" onClick={() => { setVerificationError(''); setIsScanningQr(true); }} className="mt-3 flex items-center gap-2 rounded-md bg-blue-700 px-3 py-2 font-semibold text-white hover:bg-blue-800"><QrCode size={16} /> Allow camera access</button>}
                   {isScanningQr && <div id="attendance-qr-reader" className="mt-3 overflow-hidden rounded-md bg-white" />}
                 </div>
               ) : (
