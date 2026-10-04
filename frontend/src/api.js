@@ -11,3 +11,15 @@ export const setAdminToken = token => {
 };
 
 setAdminToken(localStorage.getItem('adminToken'));
+
+axios.interceptors.response.use(
+	response => response,
+	error => {
+		if (error.response?.status === 401 && !error.config?.url?.endsWith('/admin/login')) {
+			localStorage.removeItem('adminToken');
+			setAdminToken(null);
+			window.location.assign('/admin');
+		}
+		return Promise.reject(error);
+	}
+);
