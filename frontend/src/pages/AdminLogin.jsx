@@ -1,14 +1,12 @@
 import { useState } from 'react';
 import axios from 'axios';
 import { Eye, EyeOff } from 'lucide-react';
-import { useLocation } from 'react-router-dom';
 import { API_BASE_URL, setAdminToken } from '../api';
 
 export default function AdminLogin({ onLogin }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const location = useLocation();
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -29,7 +27,6 @@ export default function AdminLogin({ onLogin }) {
     <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
       <div className="bg-white max-w-sm w-full rounded-2xl shadow-xl overflow-hidden p-8">
         <h1 className="text-2xl font-bold text-center text-gray-900 mb-6">Admin Access</h1>
-        {location.state?.passwordChanged && <div className="mb-4 rounded-lg bg-green-50 p-3 text-center text-sm text-green-700">Password changed. Sign in with your new password.</div>}
         {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-4 text-sm text-center">{error}</div>}
         
         <form onSubmit={handleLogin}>
