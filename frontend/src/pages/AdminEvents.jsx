@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { AlertTriangle, CalendarPlus, Check, CheckCircle2, Copy, Crosshair, Download, Search, UserPlus, X, XCircle, Users, MapPin, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CalendarPlus, Check, CheckCircle2, Copy, Crosshair, Download, Search, UserPlus, X, XCircle, Users, MapPin, RefreshCw, StopCircle } from 'lucide-react';
 import { API_BASE_URL } from '../api';
 import AdminNav from '../components/AdminNav';
 
@@ -134,6 +134,21 @@ export default function AdminEvents({ onLogout, isDarkMode, onToggleDarkMode }) 
       setAttendanceError(requestError.response?.data?.message || 'Could not add this student to the meeting');
     } finally {
       setAddingStudent(false);
+    }
+  };
+
+  const endSession = async () => {
+    if (selectedEvent.status === 'closed') return;
+    if (!window.confirm('End this session? No more attendance will be accepted.')) return;
+
+    setAttendanceError('');
+    try {
+      const response = await axios.patch(`${API_BASE_URL}/events/${selectedEvent._id}/close`);
+      setSelectedEvent(response.data.event);
+      setEvents(previous => previous.map(event => event._id === selectedEvent._id ? response.data.event : event));
+      setShowAddStudent(false);
+    } catch (requestError) {
+      setAttendanceError(requestError.response?.data?.message || 'Could not end this session');
     }
   };
 
@@ -353,9 +368,9 @@ export default function AdminEvents({ onLogout, isDarkMode, onToggleDarkMode }) 
       </div>
 
       {selectedEvent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 p-4" role="dialog" aria-modal="true" aria-labelledby="attendance-dialog-title">
-          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
-            <div className="flex items-start justify-between border-b border-gray-200 p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 p-2 sm:p-4" role="dialog" aria-modal="true" aria-labelledby="attendance-dialog-title">
+          <div className="flex max-h-[96vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-gray-200 p-4 sm:p-6">
               <div>
                 <div className="flex items-center gap-2">
                   <h2 id="attendance-dialog-title" className="text-xl font-bold text-gray-900">{selectedEvent.name}</h2>
@@ -366,7 +381,7 @@ export default function AdminEvents({ onLogout, isDarkMode, onToggleDarkMode }) 
               <button type="button" onClick={() => setSelectedEvent(null)} title="Close attendance details" className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900"><X size={20} /></button>
             </div>
 
-            <div className="overflow-y-auto p-6">
+            <div className="overflow-y-auto p-4 sm:p-6">
               {attendanceError && <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{attendanceError}</div>}
               {attendanceLoading ? <p className="py-12 text-center text-gray-500">Loading attendance records...</p> : (
                 <>
@@ -377,17 +392,20 @@ export default function AdminEvents({ onLogout, isDarkMode, onToggleDarkMode }) 
                     <div className="rounded-lg border border-red-200 bg-red-50 p-4"><p className="text-xs font-semibold uppercase text-red-700">Absent</p><p className="mt-1 text-2xl font-bold text-red-700">{selectedAttendance.filter(record => record.status === 'absent').length}</p></div>
                   </div>
 
-                  <div className="mb-4">
-                    <button type="button" onClick={() => setShowAddStudent(value => !value)} className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+                  <div className="mb-4 flex flex-wrap items-center gap-2">
+                    <button type="button" onClick={() => setShowAddStudent(value => !value)} disabled={selectedEvent.status === 'closed'} className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
                       <UserPlus size={16} /> {showAddStudent ? 'Cancel add student' : 'Add student'}
                     </button>
+                    <button type="button" onClick={endSession} disabled={selectedEvent.status === 'closed'} className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50">
+                      <StopCircle size={16} /> {selectedEvent.status === 'closed' ? 'Session ended' : 'End session'}
+                    </button>
                     {showAddStudent && (
-                      <form onSubmit={addManualStudent} className="mt-3 grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 sm:grid-cols-2 lg:grid-cols-3">
-                        <input aria-label="Student name" value={manualStudent.name} onChange={event => setManualStudent(previous => ({ ...previous, name: event.target.value }))} placeholder="Full name" required className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm" />
-                        <input aria-label="Register number" value={manualStudent.regNumber} onChange={event => setManualStudent(previous => ({ ...previous, regNumber: event.target.value }))} placeholder="Register number" required className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm" />
-                        <input aria-label="Course" value={manualStudent.course} onChange={event => setManualStudent(previous => ({ ...previous, course: event.target.value }))} placeholder="Course" required className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm" />
-                        <input aria-label="Semester or section" value={manualStudent.section} onChange={event => setManualStudent(previous => ({ ...previous, section: event.target.value }))} placeholder="Semester / section" required className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm" />
-                        <select aria-label="Initial attendance status" value={manualStudent.status} onChange={event => setManualStudent(previous => ({ ...previous, status: event.target.value }))} className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm">
+                      <form onSubmit={addManualStudent} className="mt-1 basis-full grid w-full gap-3 rounded-lg border border-slate-700 bg-[#111923] p-4 text-slate-100 sm:grid-cols-2 lg:grid-cols-3">
+                        <input aria-label="Student name" value={manualStudent.name} onChange={event => setManualStudent(previous => ({ ...previous, name: event.target.value }))} placeholder="Full name" required className="min-w-0 rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400" />
+                        <input aria-label="Register number" value={manualStudent.regNumber} onChange={event => setManualStudent(previous => ({ ...previous, regNumber: event.target.value }))} placeholder="Register number" required className="min-w-0 rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400" />
+                        <input aria-label="Course" value={manualStudent.course} onChange={event => setManualStudent(previous => ({ ...previous, course: event.target.value }))} placeholder="Course" required className="min-w-0 rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400" />
+                        <input aria-label="Semester or section" value={manualStudent.section} onChange={event => setManualStudent(previous => ({ ...previous, section: event.target.value }))} placeholder="Semester / section" required className="min-w-0 rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400" />
+                        <select aria-label="Initial attendance status" value={manualStudent.status} onChange={event => setManualStudent(previous => ({ ...previous, status: event.target.value }))} className="min-w-0 rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100">
                           <option value="present">Present</option>
                           <option value="absent">Absent</option>
                         </select>
@@ -398,20 +416,20 @@ export default function AdminEvents({ onLogout, isDarkMode, onToggleDarkMode }) 
                     )}
                   </div>
 
-                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                    <label className="relative min-w-[220px] flex-1">
+                  <div className="mb-4 flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
+                    <label className="relative min-w-0 flex-1">
                       <Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                       <input value={attendeeQuery} onChange={event => setAttendeeQuery(event.target.value)} placeholder="Search name, register number, or course" className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm" />
                     </label>
-                    <div className="flex items-center gap-2">
-                      <select value={attendanceFilter} onChange={event => setAttendanceFilter(event.target.value)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <select value={attendanceFilter} onChange={event => setAttendanceFilter(event.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 sm:w-auto">
                         <option value="all">All statuses</option>
                         <option value="present">Present</option>
                         <option value="needs_review">Needs review</option>
                         <option value="absent">Absent</option>
                         <option value="rejected">Rejected</option>
                       </select>
-                      <button type="button" onClick={() => downloadAttendance(selectedEvent._id)} title="Download attendance CSV" className="flex items-center gap-2 rounded-lg bg-gray-800 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-900"><Download size={16} /> CSV</button>
+                      <button type="button" onClick={() => downloadAttendance(selectedEvent._id)} title="Download attendance CSV" className="flex items-center justify-center gap-2 rounded-lg bg-gray-800 px-3 py-2 text-sm font-semibold text-white hover:bg-gray-900"><Download size={16} /> CSV</button>
                     </div>
                   </div>
 
