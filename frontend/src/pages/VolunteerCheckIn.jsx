@@ -4,17 +4,6 @@ import { Keyboard, QrCode } from 'lucide-react';
 import { API_BASE_URL } from '../api';
 import { useParams, useSearchParams } from 'react-router-dom';
 
-const calculateDistance = (latitude1, longitude1, latitude2, longitude2) => {
-  const radians = Math.PI / 180;
-  const latitudeDelta = (latitude2 - latitude1) * radians;
-  const longitudeDelta = (longitude2 - longitude1) * radians;
-  const haversine = Math.sin(latitudeDelta / 2) ** 2 +
-    Math.cos(latitude1 * radians) * Math.cos(latitude2 * radians) *
-    Math.sin(longitudeDelta / 2) ** 2;
-
-  return Math.round(6371e3 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine)));
-};
-
 export default function VolunteerCheckIn() {
   const { eventId } = useParams();
   const [searchParams] = useSearchParams();
@@ -214,18 +203,9 @@ export default function VolunteerCheckIn() {
     }
   };
 
-  const distanceToVenue = location && event?.location
-    ? calculateDistance(event.location.latitude, event.location.longitude, location.latitude, location.longitude)
-    : null;
-  const withinReliableRadius = distanceToVenue !== null &&
-    distanceToVenue + location.accuracy <= event.location.radius;
   const accuracyStyle = !location
     ? 'border-gray-200 bg-gray-50 text-gray-700'
-    : location.accuracy < 50
-      ? 'border-green-200 bg-green-50 text-green-800'
-      : location.accuracy < 100
-        ? 'border-yellow-200 bg-yellow-50 text-yellow-800'
-        : 'border-red-200 bg-red-50 text-red-800';
+    : 'border-green-200 bg-green-50 text-green-800';
 
   return (
     <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
@@ -251,7 +231,7 @@ export default function VolunteerCheckIn() {
 
               {verificationMethod === 'qr' ? (
                 <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-                  {attendanceToken ? <p className="font-semibold">Meeting QR accepted. It expires shortly.</p> : <p>Tap below to allow camera access, then point your camera at the live meeting QR.</p>}
+                  {attendanceToken ? <p className="font-semibold">Meeting QR accepted for this meeting.</p> : <p>Tap below to allow camera access, then point your camera at the meeting QR.</p>}
                   {verificationError && <p className="mt-2 text-red-700" role="alert">{verificationError}</p>}
                   {!attendanceToken && !isScanningQr && <button type="button" onClick={() => { setVerificationError(''); setIsScanningQr(true); }} className="mt-3 flex items-center gap-2 rounded-md bg-blue-700 px-3 py-2 font-semibold text-white hover:bg-blue-800"><QrCode size={16} /> Allow camera access</button>}
                   {isScanningQr && <div id="attendance-qr-reader" className="mt-3 overflow-hidden rounded-md bg-white" />}
@@ -268,24 +248,18 @@ export default function VolunteerCheckIn() {
               <div className={`rounded-lg border p-3 text-sm ${accuracyStyle}`} aria-live="polite">
                 {!location ? (
                   <div className="flex items-center justify-between gap-3">
-                    <span>{locationError || 'Check your GPS before submitting.'}</span>
+                    <span>{locationError || 'Allow location access before submitting.'}</span>
                     <button type="button" onClick={startLocationTracking} disabled={watchingLocation}
                       className="shrink-0 rounded-md bg-white px-3 py-2 font-semibold shadow-sm disabled:opacity-60">
-                      {watchingLocation ? 'Locating…' : locationError ? 'Retry location' : 'Check location'}
+                      {watchingLocation ? 'Requesting permission…' : locationError ? 'Retry permission' : 'Allow location'}
                     </button>
                   </div>
                 ) : (
                   <div className="space-y-1">
-                    <p className="font-semibold">GPS accuracy: about {Math.round(location.accuracy)}m</p>
-                    <p>{distanceToVenue}m from venue · radius {event.location.radius}m</p>
-                    <p className="text-xs">
-                      {withinReliableRadius
-                        ? 'Location estimate fits within the venue radius.'
-                        : 'Check-in is blocked until GPS accuracy and venue distance fit the meeting radius. Refresh GPS or move closer.'}
-                    </p>
+                    <p className="font-semibold">Location permission granted.</p>
                     {locationError && <p className="text-xs">{locationError}</p>}
                     <button type="button" onClick={startLocationTracking} disabled={watchingLocation} className="mt-2 rounded-md bg-white px-3 py-2 text-xs font-semibold text-blue-700 shadow-sm disabled:opacity-60">
-                      {watchingLocation ? 'Updating GPS...' : 'Refresh GPS'}
+                      {watchingLocation ? 'Requesting permission...' : 'Refresh location'}
                     </button>
                   </div>
                 )}

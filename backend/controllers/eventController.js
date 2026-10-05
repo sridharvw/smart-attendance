@@ -105,19 +105,13 @@ exports.getCurrentCode = async (req, res) => {
     const { eventId } = req.params;
     const now = new Date();
 
-    let currentCode = await EventCode.findOne({
-      event_id: eventId,
-      valid_from: { $lte: now },
-      valid_until: { $gte: now }
-    });
+    let currentCode = await EventCode.findOne({ event_id: eventId }).sort({ valid_until: -1 });
 
-    if (!currentCode || !currentCode.token || !/^\d{6}$/.test(currentCode.code)) {
+    if (!currentCode) {
       const code = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
       const token = crypto.randomBytes(32).toString('hex');
       const valid_from = now;
       const valid_until = new Date(now.getTime() + 30 * 1000);
-
-      await EventCode.deleteMany({ event_id: eventId });
 
       currentCode = await EventCode.create({
         event_id: eventId,
@@ -126,6 +120,18 @@ exports.getCurrentCode = async (req, res) => {
         valid_from,
         valid_until
       });
+    } else if (
+      currentCode.valid_until < now ||
+      !/^\d{6}$/.test(currentCode.code) ||
+      !/^[a-f0-9]{64}$/i.test(currentCode.token)
+    ) {
+      currentCode.code = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
+      currentCode.valid_from = now;
+      currentCode.valid_until = new Date(now.getTime() + 30 * 1000);
+      if (!currentCode.token || !/^[a-f0-9]{64}$/i.test(currentCode.token)) {
+        currentCode.token = crypto.randomBytes(32).toString('hex');
+      }
+      await currentCode.save();
     }
 
     const secondsLeft = Math.ceil((new Date(currentCode.valid_until) - now) / 1000);

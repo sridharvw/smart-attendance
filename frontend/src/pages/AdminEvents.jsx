@@ -240,7 +240,7 @@ export default function AdminEvents({ onLogout, isDarkMode, onToggleDarkMode }) 
           <div className="mb-6 flex flex-wrap items-center gap-5 rounded-xl border border-green-200 bg-green-50 p-5">
             <div className="min-w-0 flex-1">
               <h2 className="font-bold text-green-900">Meeting link ready</h2>
-              <p className="mt-1 text-sm text-green-800">Volunteers must scan the live rotating QR on the dashboard when they arrive.</p>
+              <p className="mt-1 text-sm text-green-800">Volunteers can scan the meeting QR once on the dashboard when they arrive.</p>
               <div className="mt-3 flex max-w-xl items-center gap-2 rounded-lg border border-green-200 bg-white p-2">
                 <input readOnly value={meetingUrl(createdEvent._id)} className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none" />
                 <button type="button" title="Copy meeting link" onClick={() => navigator.clipboard.writeText(meetingUrl(createdEvent._id))} className="rounded-md p-2 text-green-700 hover:bg-green-50"><Copy size={16} /></button>

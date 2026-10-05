@@ -3,7 +3,6 @@ const Event = require('../models/Event');
 const Attendance = require('../models/Attendance');
 const EventCode = require('../models/EventCode');
 const calculateDistance = require('../utils/geoDistance');
-const isWithinReliableGeofence = require('../utils/isWithinReliableGeofence');
 
 exports.getDirectory = async (req, res) => {
   try {
@@ -105,13 +104,13 @@ exports.markAttendance = async (req, res) => {
   try {
     const { regNumber, name, course, section, event_id, latitude, longitude, accuracy, device_id, code, token } = req.body;
 
-    const gpsAccuracy = typeof accuracy === 'number' ? accuracy : NaN;
+    const gpsAccuracy = typeof accuracy === 'number' && Number.isFinite(accuracy) ? accuracy : null;
     const numericLatitude = Number(latitude);
     const numericLongitude = Number(longitude);
     const hasValidCode = typeof code === 'string' && /^\d{6}$/.test(code);
     const hasValidToken = typeof token === 'string' && /^[a-f0-9]{64}$/i.test(token);
-    if (!regNumber || !name || !course || !section || (!hasValidCode && !hasValidToken) || (hasValidCode && hasValidToken) || !device_id || !Number.isFinite(numericLatitude) || numericLatitude < -90 || numericLatitude > 90 || !Number.isFinite(numericLongitude) || numericLongitude < -180 || numericLongitude > 180 || !Number.isFinite(gpsAccuracy) || gpsAccuracy < 0 || gpsAccuracy > 100) {
-      return res.status(400).json({ message: 'Complete student details and a valid location with GPS accuracy are required' });
+    if (!regNumber || !name || !course || !section || (!hasValidCode && !hasValidToken) || (hasValidCode && hasValidToken) || !device_id || !Number.isFinite(numericLatitude) || numericLatitude < -90 || numericLatitude > 90 || !Number.isFinite(numericLongitude) || numericLongitude < -180 || numericLongitude > 180) {
+      return res.status(400).json({ message: 'Complete student details and a valid location are required' });
     }
     
     // Ensure event is open
@@ -127,12 +126,16 @@ exports.markAttendance = async (req, res) => {
       await event.save();
     }
 
-    // Verify rotating code
+    // Verify the meeting QR token or current rotating code.
     const validCode = await EventCode.findOne({
       event_id: event._id,
       ...(hasValidToken ? { token } : { code }),
-      valid_from: { $lte: now },
-      valid_until: { $gte: now }
+      ...(hasValidToken
+        ? {}
+        : {
+            valid_from: { $lte: now },
+            valid_until: { $gte: now }
+          })
     });
 
     if (!validCode) {
@@ -145,10 +148,6 @@ exports.markAttendance = async (req, res) => {
       numericLatitude,
       numericLongitude
     );
-    if (!isWithinReliableGeofence(distance, gpsAccuracy, event.location.radius)) {
-      return res.status(403).json({ message: 'Check-in denied. Move inside the meeting area and retry with an accurate GPS signal.' });
-    }
-
     // Find or auto-create user
     let user = await User.findOne({ register_number: regNumber.toUpperCase() });
     if (!user) {

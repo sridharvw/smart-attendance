@@ -302,7 +302,7 @@ export default function AdminDashboard({ onLogout, isDarkMode, onToggleDarkMode 
         <div className="mb-6 flex flex-wrap items-center justify-between gap-5 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
           <div>
             <h2 className="text-lg font-bold text-gray-900">Live check-in QR</h2>
-            <p className="mt-1 max-w-xl text-sm text-gray-600">Volunteers can scan this QR in the form or enter its six-digit code. Both refresh every 30 seconds; check-in is limited to the meeting geofence.</p>
+            <p className="mt-1 max-w-xl text-sm text-gray-600">Volunteers can scan this QR once for the meeting or enter its six-digit code. The QR stays the same while the six-digit code refreshes every 30 seconds.</p>
             {codeError
               ? <p className="mt-3 text-sm font-semibold text-red-700" role="alert">{codeError}</p>
               : <p className="mt-3 text-sm font-semibold text-blue-700">Refreshes in {codeData.expires_in}s</p>}

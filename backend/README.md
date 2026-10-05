@@ -6,8 +6,8 @@ Express and MongoDB API for the NSS Smart Attendance application.
 
 - Admin login and JWT session creation.
 - Meeting creation, scheduling, closing, and public meeting lookup.
-- Five-minute rotating attendance codes.
-- GPS distance and geofence validation.
+- Thirty-second rotating attendance codes with one QR credential per meeting.
+- Location permission and coordinates are recorded, but check-in is not restricted by distance.
 - Duplicate and shared-device detection.
 - Attendance review and accept/reject operations.
 - Event CSV and cumulative directory data.
